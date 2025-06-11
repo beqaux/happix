@@ -4,97 +4,152 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
+import { Tweet } from '../../types/tweet';
+import { User } from '../../types/user';
 
-interface Tweet {
-  id: string;
-  text: string;
-  created_at: string;
-  author_id: string;
-  public_metrics: {
-    retweet_count: number;
-    reply_count: number;
-    like_count: number;
-    quote_count: number;
+interface SentimentAnalysis {
+  score: number;
+  category: string;
+  type: string;
+  stats: {
+    bertScore: number;
+    bertLabel: string;
+    emojiScore: number;
+    emojis: number;
   };
 }
 
-interface User {
-  id: string;
-  name: string;
-  username: string;
-  profile_image_url: string;
-}
-
-interface ApiError {
-  error: string;
-  message: string;
-  retryAfter?: string;
-  details?: string;
+interface TweetWithSentiment extends Tweet {
+  sentiment?: SentimentAnalysis;
 }
 
 export default function ArchivePage() {
   const { data: session } = useSession();
-  const [tweets, setTweets] = useState<Tweet[]>([]);
+  const [tweets, setTweets] = useState<TweetWithSentiment[]>([]);
   const [users, setUsers] = useState<{ [key: string]: User }>({});
-  const [nextToken, setNextToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<ApiError | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [filter, setFilter] = useState<string>('all'); // 'all', 'positive', 'negative', 'neutral'
+  const [typeFilter, setTypeFilter] = useState<string>('all'); // 'all', 'komik', 'bilgilendirici', 'motivasyonel', 'sanatsal'
 
-  const fetchTweets = async (cursor?: string) => {
+  useEffect(() => {
+    if (session?.accessToken) {
+      fetchTweets();
+    }
+  }, [session]);
+
+  const fetchTweets = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const response = await fetch(
-        `/api/tweets${cursor ? `?cursor=${cursor}` : ""}`
-      );
-
+      const response = await fetch('/api/tweets');
+      
       if (!response.ok) {
-        const errorData: ApiError = await response.json();
-        setError(errorData);
-        return;
+        if (response.status === 429) {
+          const retryAfter = parseInt(response.headers.get('retry-after') || '60');
+          setRetryAfter(retryAfter);
+          throw new Error(`Rate limit exceeded. Try again in ${retryAfter} seconds.`);
+        }
+        throw new Error('Failed to fetch tweets');
       }
 
       const data = await response.json();
+      
+      // Her tweet için duygu analizi yap
+      const tweetsWithSentiment = await Promise.all(
+        data.tweets.map(async (tweet: Tweet) => {
+          try {
+            const sentimentResponse = await fetch('/api/sentiment', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ text: tweet.text }),
+            });
 
-      if (cursor) {
-        setTweets(prev => [...prev, ...(data.tweets || [])]);
-      } else {
-        setTweets(data.tweets || []);
-      }
+            if (sentimentResponse.ok) {
+              const sentiment = await sentimentResponse.json();
+              return { ...tweet, sentiment };
+            }
+            return tweet;
+          } catch (error) {
+            console.error('Error analyzing tweet:', error);
+            return tweet;
+          }
+        })
+      );
 
-      // Convert users array to object for easier lookup
-      const usersObj = (data.users || []).reduce((acc: { [key: string]: User }, user: User) => {
+      setTweets(tweetsWithSentiment);
+      
+      // Kullanıcı bilgilerini güncelle
+      const usersObj = data.users.reduce((acc: { [key: string]: User }, user: User) => {
         acc[user.id] = user;
         return acc;
       }, {});
-
       setUsers(prev => ({ ...prev, ...usersObj }));
-      setNextToken(data.next_token);
-    } catch (err) {
-      setError({
-        error: "Error",
-        message: "Failed to load tweets. Please try again later.",
-        details: err instanceof Error ? err.message : "Unknown error"
-      });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'An error occurred');
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    if (session) {
-      fetchTweets();
+  const filteredTweets = tweets.filter(tweet => {
+    const matchesCategory = filter === 'all' || (tweet.sentiment?.category === filter);
+    const matchesType = typeFilter === 'all' || (tweet.sentiment?.type === typeFilter);
+    return matchesCategory && matchesType;
+  });
+
+  const getSentimentColor = (category?: string) => {
+    switch (category) {
+      case 'pozitif':
+        return 'text-green-600';
+      case 'negatif':
+        return 'text-red-600';
+      default:
+        return 'text-gray-600';
     }
-  }, [session]);
+  };
+
+  const getTypeEmoji = (type: string) => {
+    switch (type) {
+      case 'komik':
+        return '😂';
+      case 'bilgilendirici':
+        return '💡';
+      case 'motivasyonel':
+        return '💪';
+      case 'sanatsal':
+        return '🎨';
+      default:
+        return '📝';
+    }
+  };
 
   if (!session) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-24">
-        <h1 className="text-4xl font-bold mb-4">Please Sign In</h1>
-        <p className="text-gray-600">
-          You need to sign in with your X account to view your archive.
-        </p>
+      <div className="p-4">
+        <p>Please sign in to view your archive.</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="p-4">Loading your archive...</div>;
+  }
+
+  if (error) {
+    return (
+      <div className="p-4">
+        <p className="text-red-500">{error}</p>
+        {retryAfter && (
+          <p>Please wait {retryAfter} seconds before trying again.</p>
+        )}
+        <Button onClick={fetchTweets} className="mt-2">
+          Retry
+        </Button>
       </div>
     );
   }
@@ -103,30 +158,37 @@ export default function ArchivePage() {
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-4xl font-bold mb-8">Your Positive Interactions</h1>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-8">
-          <h3 className="text-red-800 font-semibold mb-2">{error.message}</h3>
-          {error.retryAfter && (
-            <p className="text-red-600">
-              Please try again after {new Date(error.retryAfter).toLocaleTimeString()}
-            </p>
-          )}
-          {error.details && (
-            <p className="text-red-600 text-sm mt-2">
-              Technical details: {error.details}
-            </p>
-          )}
-        </div>
-      )}
+      <div className="mb-4 flex gap-2">
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          className="p-2 border rounded"
+        >
+          <option value="all">Tüm Duygular</option>
+          <option value="pozitif">Pozitif</option>
+          <option value="negatif">Negatif</option>
+          <option value="nötr">Nötr</option>
+        </select>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {tweets.map((tweet) => {
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value)}
+          className="p-2 border rounded"
+        >
+          <option value="all">Tüm Tipler</option>
+          <option value="komik">Komik</option>
+          <option value="bilgilendirici">Bilgilendirici</option>
+          <option value="motivasyonel">Motivasyonel</option>
+          <option value="sanatsal">Sanatsal</option>
+          <option value="genel">Genel</option>
+        </select>
+      </div>
+
+      <div className="space-y-4">
+        {filteredTweets.map((tweet) => {
           const user = users[tweet.author_id];
           return (
-            <div
-              key={tweet.id}
-              className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow"
-            >
+            <div key={tweet.id} className="bg-white rounded-lg shadow-md p-6">
               {user && (
                 <div className="flex items-center mb-4">
                   <div className="relative w-12 h-12 mr-4">
@@ -139,17 +201,34 @@ export default function ArchivePage() {
                     />
                   </div>
                   <div>
-                    <h3 className="font-semibold">{user.name}</h3>
-                    <p className="text-gray-600">@{user.username}</p>
+                    <p className="font-semibold">{user.name}</p>
+                    <p className="text-gray-500">@{user.username}</p>
                   </div>
                 </div>
               )}
+              
               <p className="text-gray-800 mb-4">{tweet.text}</p>
-              <div className="flex justify-between text-sm text-gray-500">
+              
+              {tweet.sentiment && (
+                <div className="text-sm space-y-2">
+                  <p className={getSentimentColor(tweet.sentiment.category)}>
+                    Duygu: {tweet.sentiment.category} (Skor: {tweet.sentiment.score.toFixed(2)})
+                  </p>
+                  <p>
+                    Tip: {getTypeEmoji(tweet.sentiment.type)} {tweet.sentiment.type}
+                  </p>
+                  <div className="text-gray-500 text-xs space-y-1">
+                    <p>BERT Skoru: {tweet.sentiment.stats.bertScore.toFixed(2)} ({tweet.sentiment.stats.bertLabel})</p>
+                    <p>Emoji Skoru: {tweet.sentiment.stats.emojiScore.toFixed(2)} (Emoji Sayısı: {tweet.sentiment.stats.emojis})</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-between text-sm text-gray-500 mt-4">
                 <span>{new Date(tweet.created_at).toLocaleDateString()}</span>
                 <div className="flex space-x-4">
-                  <span>🔄 {tweet.public_metrics.retweet_count}</span>
                   <span>💬 {tweet.public_metrics.reply_count}</span>
+                  <span>🔄 {tweet.public_metrics.retweet_count}</span>
                   <span>❤️ {tweet.public_metrics.like_count}</span>
                 </div>
               </div>
@@ -157,24 +236,6 @@ export default function ArchivePage() {
           );
         })}
       </div>
-
-      {nextToken && (
-        <div className="mt-8 flex justify-center">
-          <Button
-            onClick={() => fetchTweets(nextToken)}
-            disabled={loading}
-            className="px-6 py-2"
-          >
-            {loading ? "Loading..." : "Load More"}
-          </Button>
-        </div>
-      )}
-
-      {loading && tweets.length === 0 && (
-        <div className="flex justify-center items-center min-h-[200px]">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        </div>
-      )}
     </div>
   );
 } 
