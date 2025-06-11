@@ -1,0 +1,116 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Proje: Pozitif Etkileşim Arşivi
+Bu doküman, "Pozitif Etkileşim Arşivi" web uygulamasının proje vizyonunu, teknik mimarisini, temel özelliklerini ve geliştirme yol haritasını açıklamaktadır.
+
+1. Proje Vizyonu ve Amacı
+Sorun: X (Twitter) gibi sosyal medya platformları, anlık ve genellikle olumsuz içerik akışlarıyla doludur. Kullanıcıların beğendiği, onlara ilham veren veya onları güldüren pozitif etkileşimler, bu akış içinde hızla kaybolur.
+
+Amaç: Kullanıcılara, X hesaplarındaki pozitif anları (beğeniler, olumlu yanıtlar, kaydedilenler) otomatik olarak arşivleyebilecekleri, sakin ve kişisel bir dijital alan sunmaktır. Bu uygulama, kullanıcıların istedikleri zaman geri dönüp bu pozitif anıları yeniden keşfederek dijital refahlarını artırmalarına yardımcı olacaktır.
+
+2. Temel Özellikler (MVP - Minimum Viable Product)
+İlk sürümde odaklanılacak temel işlevler şunlardır:
+
+X ile Güvenli Giriş: Kullanıcılar, next-auth gibi standart bir kütüphane aracılığıyla X hesaplarıyla güvenli bir şekilde uygulamaya giriş yapacaklar.
+
+Beğenilen Tweetleri Çekme: Kullanıcının geçmişte beğendiği tweet'ler, X API v2 kullanılarak çekilecek.
+
+"Cursor" Tabanlı Sonsuz Kaydırma: Tweet'ler tek seferde değil, kullanıcı aşağı kaydırdıkça veya "Daha Fazla Yükle" butonuna bastıkça parça parça yüklenecek. Bu, hem performansı artıracak hem de API limitlerini verimli kullanmayı sağlayacaktır.
+
+Minimalist Arayüz: Çekilen tweet'ler, dikkat dağıtıcı unsurlardan arındırılmış, temiz ve okunabilir "kartlar" halinde gösterilecek.
+
+3. "Cursor" Tabanlı Sayfalama Mimarisi (Cursor Rules)
+Projenin teknik kalbini "cursor" (imleç) tabanlı sayfalama oluşturur. Bu model, zaman akışına dayalı veriler için geleneksel sayfa numaralandırmasından (sayfa=1, sayfa=2) çok daha verimli ve tutarlıdır.
+
+Neden Gerekli?
+X gibi sürekli güncellenen bir akışta, siz 2. sayfaya geçtiğinizde 1. sayfadaki veri sayısı değişebilir. Bu durum, sayfa numaralandırmayı güvenilmez kılar. Cursor ise "bana en son verdiğin veriden sonrasını ver" diyerek bu sorunu çözer.
+
+Çalışma Akışı:
+
+İlk İstek (Client -> Sunucu):
+
+Kullanıcı /archive sayfasına girer.
+
+Frontend, uygulamanın backend'ine (Next.js API route) cursor parametresi olmadan bir istek gönderir. Örn: GET /api/tweets.
+
+API Çağrısı (Sunucu -> X API):
+
+Next.js sunucusu bu isteği alır. cursor olmadığı için X API'sinden "beğenilen tweet'lerin ilk sayfasını" ister.
+
+X API, bir dizi tweet ve bir sonraki veri grubunun başlangıcını işaret eden bir next_token (bizim cursor olarak kullanacağımız değer) döner.
+
+İlk Yanıt (Sunucu -> Client):
+
+Next.js sunucusu, X API'sinden aldığı tweet listesini ve next_token değerini frontend'e gönderir.
+
+Sonraki İstek (Client -> Sunucu):
+
+Kullanıcı "Daha Fazla Yükle" butonuna tıklar.
+
+Frontend, bir önceki adımda aldığı next_token değerini cursor parametresi olarak kullanarak yeni bir istek gönderir. Örn: GET /api/tweets?cursor=ABC123XYZ.
+
+Döngü:
+
+2, 3 ve 4. adımlar, X API'sinden next_token gelmediği (yani tüm verilerin bittiği) ana kadar tekrarlanır.
+
+Bu yapı, verileri verimli bir şekilde yüklememizi sağlar ve X API limitlerine saygılı davranır.
+
+4. Kullanılacak Teknolojiler
+Framework: Next.js (App Router)
+
+Neden? Sunucu Taraflı Render (SSR) ve Sunucu Bileşenleri (Server Components) ile yüksek performans. API rotaları oluşturma kolaylığı. Vercel ile mükemmel entegrasyon.
+
+Bileşen Kütüphanesi: shadcn/ui
+
+Neden? Geleneksel kütüphanelerin aksine, projenize doğrudan kopyalayıp tam kontrol sahibi olabileceğiniz, erişilebilir ve estetik bileşenler sunar. Tailwind CSS üzerine kurulu olduğu için mevcut teknoloji yığınımızla kusursuz uyum sağlar ve özelleştirmesi çok kolaydır. Button, Card, Dialog gibi hazır bileşenler geliştirme sürecini hızlandıracaktır.
+
+Authentication (Kimlik Doğrulama): Next-Auth (Auth.js v5)
+
+Neden? X (Twitter) ile OAuth 2.0 akışını yönetmeyi son derece basitleştirir. Güvenli ve endüstri standardı bir çözümdür.
+
+Veritabanı (İsteğe Bağlı ama Önerilen): Vercel Postgres veya Supabase
+
+Neden? Kullanıcının arşivini kalıcı hale getirmek ve her seferinde X API'sine istek atmamak için çekilen tweet'ler bir veritabanında saklanabilir. Bu, API limitlerini aşma riskini ortadan kaldırır ve uygulamayı çok daha hızlı hale getirir. Vercel Postgres, Next.js ile kusursuz çalışır.
+
+Deployment (Yayınlama): Vercel
+
+Neden? Next.js'in yaratıcıları tarafından geliştirilmiştir. GitHub hesabına bağlanarak her push işleminde otomatik olarak dağıtım yapar. Ücretsiz başlangıç paketi bu proje için yeterlidir.
+
+API: X API v2
+
+Neden? Projenin veri kaynağıdır. Özellikle users/:id/liked_tweets endpoint'i kullanılacaktır.
+
+5. Geliştirme Yol Haritası (Roadmap)
+Aşama 1: MVP Kurulumu
+Proje Başlatma: create-next-app ile Next.js projesini oluşturma, Tailwind CSS ve shadcn/ui kurulumunu yapma.
+
+Kimlik Doğrulama: next-auth'ı kurarak "X ile Giriş Yap" akışını tamamlama.
+
+API Rotası Oluşturma: /api/tweets adında bir API rotası oluşturma. Bu rota, cursor parametresini alıp X API'sine istek atacak.
+
+Arayüz Geliştirme: Beğenilen tweet'leri listeleyen ve "Daha Fazla Yükle" butonunu içeren temel archive sayfasını oluşturma.
+
+Vercel'de Yayınlama: Projenin ilk sürümünü Vercel üzerinden canlıya alma.
+
+Aşama 2: Kalıcılık ve İyileştirmeler
+Veritabanı Entegrasyonu: Vercel Postgres veya Supabase'i projeye dahil etme.
+
+Veri Kaydetme: X'ten çekilen tweet'leri, tekrar çekilmemesi için veritabanına kaydetme.
+
+Arama ve Filtreleme: Kullanıcının kendi arşivi içinde arama yapmasını sağlayan bir özellik ekleme.
+
+Aşama 3: Gelecek Fikirler
+Beğenilere ek olarak Kaydedilenleri (Bookmarks) ve pozitif mention'ları da arşive dahil etme.
+
+Tweet'ler için basit bir duygu analizi (sentiment analysis) yaparak sadece olumlu olanları filtreleme.
+
+Kullanıcılara haftalık "Pozitif Anlar" e-posta özeti gönderme.
+
+6. Geliştirme Prensipleri ve Best Practices
+Bu projenin geliştirme sürecinde modern web geliştirme standartlarına ve en iyi pratiklere bağlı kalınacaktır. Bu kapsamda ana hedefimiz:
+
+
+Next.js'in en güncel özelliklerini (features) ve en iyi pratiklerini (best practices) kullanarak örnek bir proje oluşturmak.
