@@ -3,11 +3,25 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
 // Retry configuration
-const RETRY_COUNT = 3;
-const RETRY_DELAY = 1000; // 1 second
+const MAX_RETRY_COUNT = 2;
+const BASE_DELAY = 2000; // 2 seconds
 
 // Sleep utility
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Parse rate limit reset time
+function parseRateLimitReset(resetHeader: string | null): Date | null {
+  if (!resetHeader) return null;
+  const timestamp = parseInt(resetHeader);
+  if (isNaN(timestamp)) return null;
+  
+  const resetDate = new Date(timestamp * 1000);
+  // If the reset date is more than 24 hours in the future, something's wrong
+  if (resetDate.getTime() - Date.now() > 24 * 60 * 60 * 1000) {
+    return null;
+  }
+  return resetDate;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,7 +66,7 @@ export async function GET(request: NextRequest) {
     let retryCount = 0;
 
     // Retry loop
-    while (retryCount < RETRY_COUNT) {
+    while (retryCount <= MAX_RETRY_COUNT) {
       try {
         const response = await fetch(`${endpoint}?${queryParams}`, {
           headers: {
@@ -62,21 +76,37 @@ export async function GET(request: NextRequest) {
 
         // Check rate limit headers
         const rateLimitRemaining = response.headers.get('x-rate-limit-remaining');
-        const rateLimitReset = response.headers.get('x-rate-limit-reset');
+        const rateLimitReset = parseRateLimitReset(
+          response.headers.get('x-rate-limit-reset')
+        );
 
         console.log('Rate Limit Info:', {
           remaining: rateLimitRemaining,
-          resetAt: rateLimitReset ? new Date(parseInt(rateLimitReset) * 1000).toISOString() : null
+          resetAt: rateLimitReset?.toISOString() || 'Unknown'
         });
 
         if (response.status === 429) {
-          const resetTime = parseInt(rateLimitReset || '0') * 1000;
-          const waitTime = Math.max(0, resetTime - Date.now());
+          const waitTime = rateLimitReset 
+            ? Math.max(0, rateLimitReset.getTime() - Date.now())
+            : BASE_DELAY * Math.pow(2, retryCount); // Exponential backoff
+          
+          if (waitTime > 30000) { // If wait time is more than 30 seconds
+            return NextResponse.json({
+              error: "Rate limit exceeded",
+              retryAfter: rateLimitReset?.toISOString() || 'a few minutes',
+              message: "We've hit X's rate limit. Please try again later."
+            }, { 
+              status: 429,
+              headers: rateLimitReset ? {
+                'Retry-After': Math.ceil(waitTime / 1000).toString()
+              } : {}
+            });
+          }
           
           console.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)} seconds...`);
           
-          if (retryCount < RETRY_COUNT - 1) {
-            await sleep(Math.min(waitTime, RETRY_DELAY));
+          if (retryCount < MAX_RETRY_COUNT) {
+            await sleep(waitTime);
             retryCount++;
             continue;
           }
@@ -91,18 +121,20 @@ export async function GET(request: NextRequest) {
             attempt: retryCount + 1
           });
 
-          if (retryCount < RETRY_COUNT - 1) {
-            await sleep(RETRY_DELAY);
+          if (retryCount < MAX_RETRY_COUNT) {
+            await sleep(BASE_DELAY * Math.pow(2, retryCount));
             retryCount++;
             continue;
           }
 
-          // If we're out of retries, throw the last error
-          throw new Error(
-            `X API error (${response.status}): ${
-              errorData?.detail || response.statusText
-            }`
-          );
+          // If we're out of retries, return a user-friendly error
+          return NextResponse.json({
+            error: "Failed to fetch tweets",
+            message: "There was a problem connecting to X. Please try again later.",
+            details: errorData?.detail || response.statusText
+          }, { 
+            status: response.status 
+          });
         }
 
         const data = await response.json();
@@ -121,26 +153,40 @@ export async function GET(request: NextRequest) {
 
       } catch (error) {
         lastError = error;
-        if (retryCount < RETRY_COUNT - 1) {
-          await sleep(RETRY_DELAY);
+        if (retryCount < MAX_RETRY_COUNT) {
+          await sleep(BASE_DELAY * Math.pow(2, retryCount));
           retryCount++;
           continue;
         }
-        throw error;
+        
+        // If all retries failed, return a user-friendly error
+        return NextResponse.json({
+          error: "Service unavailable",
+          message: "We're having trouble connecting to X. Please try again later.",
+          details: error instanceof Error ? error.message : "Unknown error"
+        }, { 
+          status: 503 
+        });
       }
     }
 
     // If we get here, all retries failed
-    throw lastError || new Error('Failed to fetch tweets after all retries');
+    return NextResponse.json({
+      error: "Service unavailable",
+      message: "We're having trouble connecting to X. Please try again later.",
+      details: lastError instanceof Error ? lastError.message : "Unknown error"
+    }, { 
+      status: 503 
+    });
     
   } catch (error) {
     console.error("Error fetching tweets:", error);
-    return NextResponse.json(
-      { 
-        error: error instanceof Error ? error.message : "Failed to fetch tweets",
-        retryAfter: "Please wait a few minutes and try again"
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: "Internal server error",
+      message: "Something went wrong on our end. Please try again later.",
+      details: error instanceof Error ? error.message : "Unknown error"
+    }, { 
+      status: 500 
+    });
   }
 } 

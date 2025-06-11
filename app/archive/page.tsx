@@ -8,13 +8,27 @@ import { useCallback, useEffect, useState } from "react";
 import { Tweet, TwitterUser, getLikedTweets } from "@/lib/twitter";
 import { useSession } from "next-auth/react";
 
+interface User {
+  id: string;
+  name: string;
+  username: string;
+  profile_image_url: string;
+}
+
+interface ApiError {
+  error: string;
+  message: string;
+  retryAfter?: string;
+  details?: string;
+}
+
 export default function ArchivePage() {
   const { data: session, status } = useSession();
   const [isLoading, setIsLoading] = useState(true);
   const [tweets, setTweets] = useState<Tweet[]>([]);
-  const [users, setUsers] = useState<TwitterUser[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | undefined>();
-  const [error, setError] = useState<string | null>(null);
+  const [users, setUsers] = useState<{ [key: string]: User }>({});
+  const [nextToken, setNextToken] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
 
   const fetchTweets = useCallback(async (cursor?: string) => {
     try {
@@ -27,24 +41,41 @@ export default function ArchivePage() {
         userId: session?.user?.id
       });
 
-      const data = await getLikedTweets({
-        accessToken: session!.accessToken!,
-        userId: session!.user!.id,
-      }, cursor);
+      const response = await fetch(
+        `/api/tweets${cursor ? `?cursor=${cursor}` : ""}`
+      );
+
+      if (!response.ok) {
+        const errorData: ApiError = await response.json();
+        setError(errorData);
+        return;
+      }
+
+      const data = await response.json();
 
       console.log('API Response:', data);
 
       if (cursor) {
-        setTweets(prev => [...prev, ...data.tweets]);
-        setUsers(prev => [...prev, ...data.users]);
+        setTweets(prev => [...prev, ...(data.tweets || [])]);
       } else {
-        setTweets(data.tweets);
-        setUsers(data.users);
+        setTweets(data.tweets || []);
       }
-      setNextCursor(data.nextCursor);
-    } catch (error) {
-      console.error('Error loading tweets:', error);
-      setError(error instanceof Error ? error.message : 'Failed to load tweets');
+
+      // Convert users array to object for easier lookup
+      const usersObj = (data.users || []).reduce((acc: { [key: string]: User }, user: User) => {
+        acc[user.id] = user;
+        return acc;
+      }, {});
+
+      setUsers(prev => ({ ...prev, ...usersObj }));
+      setNextToken(data.next_token);
+    } catch (err) {
+      console.error('Error loading tweets:', err);
+      setError({
+        error: "Error",
+        message: "Failed to load tweets. Please try again later.",
+        details: err instanceof Error ? err.message : "Unknown error"
+      });
     } finally {
       setIsLoading(false);
     }
@@ -88,7 +119,17 @@ export default function ArchivePage() {
             <Inbox className="h-8 w-8 text-red-500" />
           </div>
           <h2 className="text-lg font-semibold">Error Loading Tweets</h2>
-          <p className="text-sm text-muted-foreground">{error}</p>
+          <p className="text-sm text-muted-foreground">{error.message}</p>
+          {error.retryAfter && (
+            <p className="text-sm text-muted-foreground">
+              Please try again after {new Date(error.retryAfter).toLocaleTimeString()}
+            </p>
+          )}
+          {error.details && (
+            <p className="text-sm text-muted-foreground">
+              Technical details: {error.details}
+            </p>
+          )}
           <Button 
             variant="outline" 
             onClick={() => fetchTweets()}
@@ -123,35 +164,59 @@ export default function ArchivePage() {
   }
 
   return (
-    <div className="container mx-auto py-8">
-      <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Your Archive</h1>
-        <Button 
-          variant="outline" 
-          onClick={() => fetchTweets()}
-          disabled={isLoading}
-        >
-          Refresh
-        </Button>
-      </div>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-4xl font-bold mb-8">Your Positive Interactions</h1>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {tweets.map((tweet) => {
-          const author = users.find(user => user.id === tweet.author_id);
-          if (!author) return null;
-          return <TweetCard key={tweet.id} tweet={tweet} author={author} />;
+          const user = users[tweet.author_id];
+          return (
+            <div
+              key={tweet.id}
+              className="bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow"
+            >
+              {user && (
+                <div className="flex items-center mb-4">
+                  <img
+                    src={user.profile_image_url}
+                    alt={user.name}
+                    className="w-12 h-12 rounded-full mr-4"
+                  />
+                  <div>
+                    <h3 className="font-semibold">{user.name}</h3>
+                    <p className="text-gray-600">@{user.username}</p>
+                  </div>
+                </div>
+              )}
+              <p className="text-gray-800 mb-4">{tweet.text}</p>
+              <div className="flex justify-between text-sm text-gray-500">
+                <span>{new Date(tweet.created_at).toLocaleDateString()}</span>
+                <div className="flex space-x-4">
+                  <span>🔄 {tweet.public_metrics.retweet_count}</span>
+                  <span>💬 {tweet.public_metrics.reply_count}</span>
+                  <span>❤️ {tweet.public_metrics.like_count}</span>
+                </div>
+              </div>
+            </div>
+          );
         })}
       </div>
 
-      {nextCursor && (
+      {nextToken && (
         <div className="mt-8 flex justify-center">
           <Button
-            variant="outline"
-            onClick={() => fetchTweets(nextCursor)}
+            onClick={() => fetchTweets(nextToken)}
             disabled={isLoading}
+            className="px-6 py-2"
           >
-            {isLoading ? 'Loading...' : 'Load More'}
+            {isLoading ? "Loading..." : "Load More"}
           </Button>
+        </div>
+      )}
+
+      {isLoading && tweets.length === 0 && (
+        <div className="flex justify-center items-center min-h-[200px]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
         </div>
       )}
     </div>
