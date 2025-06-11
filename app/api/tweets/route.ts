@@ -38,13 +38,13 @@ export async function GET(request: NextRequest) {
     console.log('X API Request:', {
       endpoint,
       queryParams: queryParams.toString(),
-      bearerToken: process.env.TWITTER_BEARER_TOKEN?.slice(0, 10) + '...'
+      hasAccessToken: !!session.accessToken
     });
 
-    // Make request to X API
+    // Make request to X API using OAuth token
     const response = await fetch(`${endpoint}?${queryParams}`, {
       headers: {
-        Authorization: `Bearer ${process.env.TWITTER_BEARER_TOKEN}`,
+        Authorization: `OAuth ${session.accessToken}`,
       },
     });
 
