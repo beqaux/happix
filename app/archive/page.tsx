@@ -5,13 +5,14 @@ import { TweetCard } from "@/components/tweet-card";
 import { Inbox } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { Tweet, getLikedTweets } from "@/lib/twitter";
+import { Tweet, TwitterUser, getLikedTweets } from "@/lib/twitter";
 import { useSession } from "next-auth/react";
 
 export default function ArchivePage() {
   const { data: session } = useSession();
   const [isLoading, setIsLoading] = useState(true);
   const [tweets, setTweets] = useState<Tweet[]>([]);
+  const [users, setUsers] = useState<TwitterUser[]>([]);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
 
   const fetchTweets = useCallback(async (cursor?: string) => {
@@ -24,8 +25,10 @@ export default function ArchivePage() {
 
       if (cursor) {
         setTweets(prev => [...prev, ...data.tweets]);
+        setUsers(prev => [...prev, ...data.users]);
       } else {
         setTweets(data.tweets);
+        setUsers(data.users);
       }
       setNextCursor(data.nextCursor);
     } catch (error) {
@@ -41,7 +44,23 @@ export default function ArchivePage() {
     }
   }, [session, fetchTweets]);
 
-  if (isLoading) {
+  if (!session) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-8 text-center">
+        <div className="flex max-w-md flex-col items-center gap-4">
+          <h2 className="text-lg font-semibold">Please Sign In</h2>
+          <p className="text-sm text-muted-foreground">
+            You need to sign in with your X account to view your archive.
+          </p>
+          <Button asChild>
+            <Link href="/login">Sign In</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (isLoading && tweets.length === 0) {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-8">
         <div className="h-32 w-32 animate-spin rounded-full border-4 border-muted border-t-foreground" />
@@ -84,9 +103,11 @@ export default function ArchivePage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {tweets.map((tweet) => (
-          <TweetCard key={tweet.id} tweet={tweet} />
-        ))}
+        {tweets.map((tweet) => {
+          const author = users.find(user => user.id === tweet.author_id);
+          if (!author) return null;
+          return <TweetCard key={tweet.id} tweet={tweet} author={author} />;
+        })}
       </div>
 
       {nextCursor && (
@@ -96,7 +117,7 @@ export default function ArchivePage() {
             onClick={() => fetchTweets(nextCursor)}
             disabled={isLoading}
           >
-            Load More
+            {isLoading ? 'Loading...' : 'Load More'}
           </Button>
         </div>
       )}

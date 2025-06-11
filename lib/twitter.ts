@@ -2,84 +2,61 @@ export interface Tweet {
   id: string;
   text: string;
   created_at: string;
-  author: {
-    id: string;
-    name: string;
-    username: string;
-    profile_image_url: string;
+  author_id: string;
+  public_metrics: {
+    retweet_count: number;
+    reply_count: number;
+    like_count: number;
+    quote_count: number;
+  };
+  entities?: {
+    urls?: Array<{
+      url: string;
+      expanded_url: string;
+      display_url: string;
+      media_key?: string;
+    }>;
+    mentions?: Array<{
+      username: string;
+      id: string;
+    }>;
+    hashtags?: Array<{
+      tag: string;
+    }>;
   };
 }
 
-interface TwitterAPIResponse {
-  data: {
-    id: string;
-    text: string;
-    created_at: string;
-    author_id: string;
-  }[];
-  includes: {
-    users: {
-      id: string;
-      name: string;
-      username: string;
-      profile_image_url: string;
-    }[];
-  };
-  meta: {
-    result_count: number;
-    next_token?: string;
-  };
+export interface TwitterUser {
+  id: string;
+  name: string;
+  username: string;
+  profile_image_url: string;
+}
+
+export interface TwitterResponse {
+  tweets: Tweet[];
+  users: TwitterUser[];
+  nextCursor?: string;
 }
 
 export async function getLikedTweets(
-  auth: { accessToken: string; userId: string },
+  _: { accessToken: string; userId: string },
   cursor?: string
-): Promise<{ tweets: Tweet[]; nextCursor?: string }> {
-  const params = new URLSearchParams({
-    "tweet.fields": "created_at",
-    "user.fields": "profile_image_url",
-    "expansions": "author_id",
-    "max_results": "10",
-  });
-
+): Promise<TwitterResponse> {
+  const params = new URLSearchParams();
   if (cursor) {
-    params.append("pagination_token", cursor);
+    params.append('cursor', cursor);
   }
 
-  const response = await fetch(
-    `https://api.twitter.com/2/users/${auth.userId}/liked_tweets?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${auth.accessToken}`,
-      },
-    }
-  );
-
+  const response = await fetch(`/api/tweets?${params}`);
   if (!response.ok) {
-    throw new Error(`Failed to fetch tweets: ${response.statusText}`);
+    throw new Error('Failed to fetch tweets');
   }
 
-  const data: TwitterAPIResponse = await response.json();
-
-  const tweets: Tweet[] = data.data.map((tweet) => {
-    const author = data.includes.users.find((user) => user.id === tweet.author_id);
-    if (!author) throw new Error(`Could not find author for tweet ${tweet.id}`);
-
-    return {
-      id: tweet.id,
-      text: tweet.text,
-      created_at: tweet.created_at,
-      author: {
-        id: author.id,
-        name: author.name,
-        username: author.username,
-        profile_image_url: author.profile_image_url,
-      },
-    };
-  });
-
+  const data = await response.json();
   return {
-    tweets,
-    nextCursor: data.meta.next_token,
+    tweets: data.tweets,
+    users: data.users,
+    nextCursor: data.next_token,
   };
 } 
