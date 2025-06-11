@@ -56,13 +56,13 @@ export default function ArchivePage() {
           <div className="rounded-full bg-muted p-4">
             <Inbox className="h-8 w-8" />
           </div>
-          <h2 className="text-lg font-semibold">Arşiviniz Boş</h2>
+          <h2 className="text-lg font-semibold">Your Archive is Empty</h2>
           <p className="text-sm text-muted-foreground">
-            X&apos;te beğendiğiniz gönderiler burada görünecek. Hemen birkaç gönderi beğenerek başlayın!
+            Posts you like on X will appear here. Start by liking a few posts!
           </p>
           <Button asChild>
             <Link href="https://twitter.com" target="_blank" rel="noopener noreferrer">
-              X&apos;e Git
+              Go to X
             </Link>
           </Button>
         </div>
@@ -73,13 +73,13 @@ export default function ArchivePage() {
   return (
     <div className="container mx-auto py-8">
       <div className="mb-8 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Arşiviniz</h1>
+        <h1 className="text-2xl font-bold">Your Archive</h1>
         <Button 
           variant="outline" 
           onClick={() => fetchTweets()}
           disabled={isLoading}
         >
-          Yenile
+          Refresh
         </Button>
       </div>
 
@@ -96,7 +96,7 @@ export default function ArchivePage() {
             onClick={() => fetchTweets(nextCursor)}
             disabled={isLoading}
           >
-            Daha Fazla Yükle
+            Load More
           </Button>
         </div>
       )}
