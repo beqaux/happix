@@ -76,7 +76,7 @@ export const authOptions: NextAuthOptions = {
         session.user.id = token.id as string;
       }
       const extendedSession = session as ExtendedSession;
-      extendedSession.accessToken = `${token.tokenType} ${token.accessToken}`;
+      extendedSession.accessToken = token.accessToken as string;
       return extendedSession;
     },
   },

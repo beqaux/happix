@@ -41,10 +41,10 @@ export async function GET(request: NextRequest) {
       hasAccessToken: !!session.accessToken
     });
 
-    // Make request to X API using OAuth token
+    // Make request to X API using Bearer token
     const response = await fetch(`${endpoint}?${queryParams}`, {
       headers: {
-        Authorization: `OAuth ${session.accessToken}`,
+        Authorization: `Bearer ${session.accessToken}`,
       },
     });
 
