@@ -24,8 +24,19 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: "/login",
   },
+  debug: true,
   callbacks: {
     async jwt({ token, account, profile }) {
+      console.log('JWT Callback:', { 
+        hasToken: !!token,
+        hasAccount: !!account,
+        hasProfile: !!profile,
+        accountTokens: account ? {
+          hasAccessToken: !!account.access_token,
+          hasRefreshToken: !!account.refresh_token,
+        } : null
+      });
+
       // Save token for X API
       if (account) {
         token.accessToken = account.access_token;
@@ -35,6 +46,20 @@ export const authOptions: NextAuthOptions = {
       return token;
     },
     async session({ session, token }: { session: Session; token: JWT }) {
+      console.log('Session Callback:', {
+        hasSession: !!session,
+        hasToken: !!token,
+        sessionUser: session?.user ? {
+          hasId: !!session.user.id,
+          hasName: !!session.user.name,
+          hasEmail: !!session.user.email,
+        } : null,
+        tokenData: {
+          hasAccessToken: !!token.accessToken,
+          hasId: !!token.id,
+        }
+      });
+
       // Add token to session
       if (session.user) {
         session.user.id = token.id as string;

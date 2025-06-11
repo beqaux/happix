@@ -7,6 +7,11 @@ export async function GET(request: NextRequest) {
     // Get the user session
     const session = await getServerSession(authOptions);
 
+    console.log('API Route - Session:', {
+      userId: session?.user?.id,
+      hasAccessToken: !!session?.accessToken
+    });
+
     if (!session || !session.user) {
       return NextResponse.json(
         { error: "Authentication required" },
@@ -30,6 +35,12 @@ export async function GET(request: NextRequest) {
       ...(cursor && { pagination_token: cursor }),
     });
 
+    console.log('X API Request:', {
+      endpoint,
+      queryParams: queryParams.toString(),
+      bearerToken: process.env.TWITTER_BEARER_TOKEN?.slice(0, 10) + '...'
+    });
+
     // Make request to X API
     const response = await fetch(`${endpoint}?${queryParams}`, {
       headers: {
@@ -38,21 +49,32 @@ export async function GET(request: NextRequest) {
     });
 
     if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      console.error('X API Error:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorData
+      });
       throw new Error(`X API error: ${response.statusText}`);
     }
 
     const data = await response.json();
+    console.log('X API Response:', {
+      tweetCount: data.data?.length || 0,
+      userCount: data.includes?.users?.length || 0,
+      hasNextToken: !!data.meta?.next_token
+    });
 
     // Return tweets and pagination info
     return NextResponse.json({
-      tweets: data.data,
+      tweets: data.data || [],
       users: data.includes?.users || [],
       next_token: data.meta?.next_token,
     });
   } catch (error) {
     console.error("Error fetching tweets:", error);
     return NextResponse.json(
-      { error: "Failed to fetch tweets" },
+      { error: error instanceof Error ? error.message : "Failed to fetch tweets" },
       { status: 500 }
     );
   }

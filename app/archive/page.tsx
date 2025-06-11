@@ -9,19 +9,30 @@ import { Tweet, TwitterUser, getLikedTweets } from "@/lib/twitter";
 import { useSession } from "next-auth/react";
 
 export default function ArchivePage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [isLoading, setIsLoading] = useState(true);
   const [tweets, setTweets] = useState<Tweet[]>([]);
   const [users, setUsers] = useState<TwitterUser[]>([]);
   const [nextCursor, setNextCursor] = useState<string | undefined>();
+  const [error, setError] = useState<string | null>(null);
 
   const fetchTweets = useCallback(async (cursor?: string) => {
     try {
       setIsLoading(true);
+      setError(null);
+      
+      console.log('Session state:', {
+        status,
+        accessToken: session?.accessToken,
+        userId: session?.user?.id
+      });
+
       const data = await getLikedTweets({
         accessToken: session!.accessToken!,
         userId: session!.user!.id,
       }, cursor);
+
+      console.log('API Response:', data);
 
       if (cursor) {
         setTweets(prev => [...prev, ...data.tweets]);
@@ -33,10 +44,11 @@ export default function ArchivePage() {
       setNextCursor(data.nextCursor);
     } catch (error) {
       console.error('Error loading tweets:', error);
+      setError(error instanceof Error ? error.message : 'Failed to load tweets');
     } finally {
       setIsLoading(false);
     }
-  }, [session]);
+  }, [session, status]);
 
   useEffect(() => {
     if (session?.accessToken) {
@@ -64,6 +76,27 @@ export default function ArchivePage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center p-8">
         <div className="h-32 w-32 animate-spin rounded-full border-4 border-muted border-t-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center p-8 text-center">
+        <div className="flex max-w-md flex-col items-center gap-4">
+          <div className="rounded-full bg-red-100 p-4">
+            <Inbox className="h-8 w-8 text-red-500" />
+          </div>
+          <h2 className="text-lg font-semibold">Error Loading Tweets</h2>
+          <p className="text-sm text-muted-foreground">{error}</p>
+          <Button 
+            variant="outline" 
+            onClick={() => fetchTweets()}
+            disabled={isLoading}
+          >
+            Try Again
+          </Button>
+        </div>
       </div>
     );
   }
