@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Pozitif Etkileşim Arşivi",
-  description: "X'teki olumlu anılarınızı saklayın ve yeniden keşfedin.",
+  title: "Positive Interaction Archive",
+  description: "Save and rediscover your positive memories from X.",
 };
 
 export default function RootLayout({
@@ -24,7 +24,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="tr">
+    <html lang="en">
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >

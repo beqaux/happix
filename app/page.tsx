@@ -6,47 +6,47 @@ export default function Home() {
     <div className="flex min-h-screen flex-col items-center justify-center p-8">
       <main className="flex flex-col items-center gap-8 text-center">
         <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">
-          Pozitif Etkileşim Arşivi
+          Positive Interaction Archive
         </h1>
         
         <p className="max-w-prose text-lg text-muted-foreground sm:text-xl">
-          X&apos;teki olumlu anılarınızı saklayın, organize edin ve istediğiniz zaman yeniden keşfedin.
-          Beğendiğiniz, ilham aldığınız ve sizi mutlu eden paylaşımlar artık kaybolmayacak.
+          Save your positive memories from X, organize them and rediscover them whenever you want.
+          The posts you like, get inspired by, and make you happy will no longer be lost.
         </p>
 
         <div className="flex gap-4">
           <Button asChild size="lg">
             <Link href="/login">
-              X ile Giriş Yap
+              Sign in with X
             </Link>
           </Button>
           
           <Button variant="outline" asChild size="lg">
             <Link href="/about">
-              Daha Fazla Bilgi
+              Learn More
             </Link>
           </Button>
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-8 sm:grid-cols-3 sm:gap-12">
           <div className="flex flex-col items-center gap-2">
-            <h3 className="text-lg font-semibold">Güvenli Giriş</h3>
+            <h3 className="text-lg font-semibold">Secure Login</h3>
             <p className="text-sm text-muted-foreground">
-              X hesabınızla güvenli bir şekilde giriş yapın. Verileriniz her zaman sizin kontrolünüzde.
+              Sign in securely with your X account. Your data always stays under your control.
             </p>
           </div>
 
           <div className="flex flex-col items-center gap-2">
-            <h3 className="text-lg font-semibold">Otomatik Arşivleme</h3>
+            <h3 className="text-lg font-semibold">Automatic Archiving</h3>
             <p className="text-sm text-muted-foreground">
-              Beğendiğiniz paylaşımlar otomatik olarak arşivlenir. Manuel işlem gerektirmez.
+              Posts you like are automatically archived. No manual action required.
             </p>
           </div>
 
           <div className="flex flex-col items-center gap-2">
-            <h3 className="text-lg font-semibold">Kolay Erişim</h3>
+            <h3 className="text-lg font-semibold">Easy Access</h3>
             <p className="text-sm text-muted-foreground">
-              Arşivinize istediğiniz zaman, istediğiniz yerden erişin ve pozitif anılarınızı yeniden yaşayın.
+              Access your archive anytime, anywhere and relive your positive memories.
             </p>
           </div>
         </div>

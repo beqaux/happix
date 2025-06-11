@@ -11,10 +11,10 @@ export default function LoginPage() {
       <div className="w-full max-w-md space-y-8">
         <div className="flex flex-col items-center space-y-2 text-center">
           <h1 className="text-2xl font-semibold tracking-tight">
-            X ile Giriş Yap
+            Sign in with X
           </h1>
           <p className="text-sm text-muted-foreground">
-            Arşivinize erişmek için X hesabınızla giriş yapın
+            Sign in with your X account to access your archive
           </p>
         </div>
 
@@ -23,7 +23,7 @@ export default function LoginPage() {
           size="lg"
           onClick={() => signIn("twitter", { callbackUrl: "/archive" })}
         >
-          X ile devam et
+          Continue with X
         </Button>
 
         <div className="relative">
@@ -32,7 +32,7 @@ export default function LoginPage() {
           </div>
           <div className="relative flex justify-center text-xs uppercase">
             <span className="bg-background px-2 text-muted-foreground">
-              veya
+              or
             </span>
           </div>
         </div>
@@ -40,7 +40,7 @@ export default function LoginPage() {
         <Button variant="outline" asChild className="w-full" size="lg">
           <Link href="/" className="gap-2">
             <ArrowLeft className="h-4 w-4" />
-            Ana sayfaya dön
+            Return to home
           </Link>
         </Button>
       </div>
