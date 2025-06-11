@@ -10,7 +10,7 @@ export default function Home() {
         </h1>
         
         <p className="max-w-prose text-lg text-muted-foreground sm:text-xl">
-          X'teki olumlu anılarınızı saklayın, organize edin ve istediğiniz zaman yeniden keşfedin.
+          X&apos;teki olumlu anılarınızı saklayın, organize edin ve istediğiniz zaman yeniden keşfedin.
           Beğendiğiniz, ilham aldığınız ve sizi mutlu eden paylaşımlar artık kaybolmayacak.
         </p>
 

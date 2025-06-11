@@ -85,7 +85,7 @@ Neden? Projenin veri kaynağıdır. Özellikle users/:id/liked_tweets endpoint'i
 
 5. Geliştirme Yol Haritası (Roadmap)
 Aşama 1: MVP Kurulumu
-Proje Başlatma: create-next-app ile Next.js projesini oluşturma, Tailwind CSS ve shadcn/ui kurulumunu yapma.
+Proje Başlatma: create-next-app ile Next.js projesini oluşturma, Tailwind CSS ve shadcn/ui kurulumunu yapma. YAPILDI!!!
 
 Kimlik Doğrulama: next-auth'ı kurarak "X ile Giriş Yap" akışını tamamlama.
 

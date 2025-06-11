@@ -23,11 +23,11 @@ export default function ArchivePage() {
           </div>
           <h2 className="text-lg font-semibold">Arşiviniz Boş</h2>
           <p className="text-sm text-muted-foreground">
-            X'te beğendiğiniz gönderiler burada görünecek. Hemen birkaç gönderi beğenerek başlayın!
+            X&apos;te beğendiğiniz gönderiler burada görünecek. Hemen birkaç gönderi beğenerek başlayın!
           </p>
           <Button asChild>
             <Link href="https://twitter.com" target="_blank" rel="noopener noreferrer">
-              X'e Git
+              X&apos;e Git
             </Link>
           </Button>
         </div>
