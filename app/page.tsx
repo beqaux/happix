@@ -16,14 +16,8 @@ export default function Home() {
 
         <div className="flex flex-col gap-4 sm:flex-row">
           <Button asChild size="lg">
-            <Link href="/timeline">
-              View Positive Timeline
-            </Link>
-          </Button>
-          
-          <Button asChild size="lg" variant="outline">
-            <Link href="/archive">
-              Browse Liked Tweets
+            <Link href="/login">
+              Get Started
             </Link>
           </Button>
           
