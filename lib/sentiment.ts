@@ -8,103 +8,111 @@ interface SentimentResult {
 // Modeli yüklemek için yardımcı fonksiyon
 let sentimentPipeline: any = null;
 
+// Tweet kategorileri
+export const TweetCategories = {
+  MOTIVATIONAL: 'motivasyonel',
+  FUNNY: 'komik',
+  INFORMATIVE: 'bilgilendirici',
+  ARTISTIC: 'sanatsal',
+  POSITIVE: 'pozitif',
+  NEUTRAL: 'nötr'
+} as const;
+
+// Pozitif kelime grupları
+const positiveWordGroups = {
+  motivational: [
+    'başar', 'hedef', 'azim', 'inan', 'güç', 'motivasyon', 'ilham',
+    'gelişim', 'potansiyel', 'hayaller', 'vizyon', 'kararlılık'
+  ],
+  funny: [
+    'komik', 'espri', 'gül', 'eğlen', 'kahkaha', 'mizah', 'şaka',
+    'caps', 'parodi', 'absürt', 'ironi'
+  ],
+  informative: [
+    'bilgi', 'öğren', 'eğitim', 'araştır', 'keşfet', 'analiz',
+    'kaynak', 'makale', 'çalışma', 'veri', 'sonuç'
+  ],
+  artistic: [
+    'sanat', 'müzik', 'resim', 'tasarım', 'yaratıcı', 'estetik',
+    'film', 'fotoğraf', 'şiir', 'dans', 'performans'
+  ]
+};
+
+// Pozitif emoji grupları
+const positiveEmojiGroups = {
+  motivational: ['💪', '🎯', '✨', '🌟', '⭐', '🔥', '👊', '🚀', '💫'],
+  funny: ['😂', '🤣', '😅', '😆', '😄', '😃', '😹', '🤪'],
+  informative: ['📚', '💡', '🔍', '📊', '📈', '🧠', '💭', '📝'],
+  artistic: ['🎨', '🎭', '🎬', '📸', '🎵', '🎼', '🎪', '🖼️']
+};
+
 async function initializePipeline() {
   if (!sentimentPipeline) {
-    // Modeli CPU'da çalıştır
     env.backends.onnx.wasm.numThreads = 1;
-    
-    // dbmdz/bert-base-turkish-sentiment modeli
     sentimentPipeline = await pipeline('sentiment-analysis', 'dbmdz/bert-base-turkish-sentiment');
   }
   return sentimentPipeline;
 }
 
-// Emoji skorlarını tanımlayalım
-const emojiScores: { [key: string]: number } = {
-  '😊': 1, '😃': 1, '😄': 1, '😁': 1, '😅': 0.5, '😂': 0.5, '🤣': 0.5,
-  '😇': 1, '🥰': 1, '😍': 1, '🤩': 1, '😘': 1, '😗': 0.5, '☺️': 0.5,
-  '😉': 0.5, '😌': 0.5, '😏': 0, '🙂': 0.5, '🤗': 1, '🤭': 0.5,
-  '😔': -0.5, '😪': -0.5, '😕': -0.5, '😢': -1, '😭': -1, '😤': -1,
-  '😠': -1, '😡': -1, '🤬': -1, '😱': -0.5, '😨': -0.5, '😰': -0.5,
-  '😥': -0.5, '😓': -0.5, '🙄': -0.5, '😒': -0.5, '😩': -1, '😫': -1
-};
-
-// Tweet tipini belirleyen fonksiyon
-function determineTweetType(text: string, sentiment: string): string {
-  if (text.includes('😂') || text.includes('😅') || text.includes('🤣')) {
-    return 'komik';
-  } else if (text.includes('💡') || text.includes('📚') || text.includes('🎓')) {
-    return 'bilgilendirici';
-  } else if (text.includes('💪') || text.includes('✨') || text.includes('🌟')) {
-    return 'motivasyonel';
-  } else if (text.includes('🎨') || text.includes('🎭') || text.includes('🎬')) {
-    return 'sanatsal';
-  }
-
-  // Eğer emoji bazlı tip belirlenemezse, duyguya göre belirle
-  if (sentiment === 'positive') {
-    return text.length > 100 ? 'bilgilendirici' : 'motivasyonel';
-  }
-  
-  return 'genel';
-}
-
-// Emoji analizi yapan fonksiyon
-function analyzeEmojis(text: string): { score: number; count: number } {
+function calculateCategoryScore(text: string, emojis: string[], category: string): number {
+  const words = text.toLowerCase().split(/\s+/);
   let score = 0;
-  let count = 0;
 
-  for (const [emoji, emojiScore] of Object.entries(emojiScores)) {
-    const emojiRegex = new RegExp(emoji, 'g');
-    const matches = text.match(emojiRegex);
-    if (matches) {
-      score += emojiScore * matches.length;
-      count += matches.length;
+  // Kelime bazlı skor
+  const categoryWords = positiveWordGroups[category as keyof typeof positiveWordGroups] || [];
+  for (const word of words) {
+    if (categoryWords.some(keyword => word.includes(keyword))) {
+      score += 0.5;
     }
   }
 
-  return { score, count };
+  // Emoji bazlı skor
+  const categoryEmojis = positiveEmojiGroups[category as keyof typeof positiveEmojiGroups] || [];
+  for (const emoji of emojis) {
+    if (categoryEmojis.includes(emoji)) {
+      score += 0.3;
+    }
+  }
+
+  return score;
+}
+
+function detectEmojis(text: string): string[] {
+  const emojiRegex = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
+  return text.match(emojiRegex) || [];
 }
 
 export async function analyzeSentiment(text: string) {
-  try {
-    // BERT modelini yükle
-    const classifier = await initializePipeline();
-    
-    // BERT ile duygu analizi yap
-    const result = await classifier(text);
-    const bertSentiment = result[0];
-    
-    // Emoji analizi
-    const { score: emojiScore, count: emojiCount } = analyzeEmojis(text);
-    
-    // BERT ve emoji skorlarını birleştir
-    const combinedScore = (
-      bertSentiment.score * (bertSentiment.label === 'positive' ? 1 : -1) +
-      emojiScore
-    ) / (emojiCount > 0 ? 2 : 1); // Emoji varsa ortalamasını al
-    
-    // Kategoriyi belirle
-    let category = 'nötr';
-    if (combinedScore > 0.3) category = 'pozitif';
-    else if (combinedScore < -0.3) category = 'negatif';
-    
-    // Tweet tipini belirle
-    const type = determineTweetType(text, bertSentiment.label);
-    
-    return {
-      score: combinedScore,
-      category,
-      type,
-      stats: {
-        bertScore: bertSentiment.score,
-        bertLabel: bertSentiment.label,
-        emojiScore,
-        emojis: emojiCount
-      }
-    };
-  } catch (error) {
-    console.error('Sentiment analysis error:', error);
-    throw error;
-  }
+  const pipeline = await initializePipeline();
+  const result = await pipeline(text);
+  const emojis = detectEmojis(text);
+
+  // Kategori skorlarını hesapla
+  const categoryScores = {
+    motivational: calculateCategoryScore(text, emojis, 'motivational'),
+    funny: calculateCategoryScore(text, emojis, 'funny'),
+    informative: calculateCategoryScore(text, emojis, 'informative'),
+    artistic: calculateCategoryScore(text, emojis, 'artistic')
+  };
+
+  // En yüksek kategori skorunu bul
+  const topCategory = Object.entries(categoryScores)
+    .reduce((a, b) => a[1] > b[1] ? a : b)[0];
+
+  // BERT skoru pozitifse ve kategori skoru yeterince yüksekse
+  const isBertPositive = result[0].label === 'positive' && result[0].score > 0.7;
+  const hasCategoryMatch = categoryScores[topCategory as keyof typeof categoryScores] > 0.5;
+
+  return {
+    score: result[0].score,
+    category: isBertPositive ? TweetCategories.POSITIVE : TweetCategories.NEUTRAL,
+    type: hasCategoryMatch ? TweetCategories[topCategory.toUpperCase() as keyof typeof TweetCategories] : TweetCategories.NEUTRAL,
+    stats: {
+      bertScore: result[0].score,
+      bertLabel: result[0].label,
+      categoryScores,
+      topCategory,
+      emojis: emojis.length
+    }
+  };
 } 

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { Tweet } from '../../types/tweet';
 import { User } from '../../types/user';
+import { TweetCategories } from '@/lib/sentiment';
 
 interface SentimentAnalysis {
   score: number;
@@ -14,7 +15,13 @@ interface SentimentAnalysis {
   stats: {
     bertScore: number;
     bertLabel: string;
-    emojiScore: number;
+    categoryScores: {
+      motivational: number;
+      funny: number;
+      informative: number;
+      artistic: number;
+    };
+    topCategory: string;
     emojis: number;
   };
 }
@@ -30,8 +37,8 @@ export default function ArchivePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const [filter, setFilter] = useState<string>('all'); // 'all', 'positive', 'negative', 'neutral'
-  const [typeFilter, setTypeFilter] = useState<string>('all'); // 'all', 'komik', 'bilgilendirici', 'motivasyonel', 'sanatsal'
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedType, setSelectedType] = useState<string>('all');
 
   useEffect(() => {
     if (session?.accessToken) {
@@ -97,31 +104,33 @@ export default function ArchivePage() {
   };
 
   const filteredTweets = tweets.filter(tweet => {
-    const matchesCategory = filter === 'all' || (tweet.sentiment?.category === filter);
-    const matchesType = typeFilter === 'all' || (tweet.sentiment?.type === typeFilter);
+    const matchesCategory = selectedCategory === 'all' || 
+      (tweet.sentiment && tweet.sentiment.category === selectedCategory);
+    const matchesType = selectedType === 'all' || 
+      (tweet.sentiment && tweet.sentiment.type === selectedType);
     return matchesCategory && matchesType;
   });
 
-  const getSentimentColor = (category?: string) => {
+  const getCategoryColor = (category: string) => {
     switch (category) {
-      case 'pozitif':
+      case TweetCategories.POSITIVE:
         return 'text-green-600';
-      case 'negatif':
-        return 'text-red-600';
-      default:
+      case TweetCategories.NEUTRAL:
         return 'text-gray-600';
+      default:
+        return 'text-blue-600';
     }
   };
 
   const getTypeEmoji = (type: string) => {
     switch (type) {
-      case 'komik':
-        return '😂';
-      case 'bilgilendirici':
-        return '💡';
-      case 'motivasyonel':
+      case TweetCategories.MOTIVATIONAL:
         return '💪';
-      case 'sanatsal':
+      case TweetCategories.FUNNY:
+        return '😂';
+      case TweetCategories.INFORMATIVE:
+        return '💡';
+      case TweetCategories.ARTISTIC:
         return '🎨';
       default:
         return '📝';
@@ -155,32 +164,30 @@ export default function ArchivePage() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <h1 className="text-4xl font-bold mb-8">Your Positive Interactions</h1>
-
-      <div className="mb-4 flex gap-2">
+    <div className="container mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-6">Tweet Arşivim</h1>
+      
+      <div className="flex gap-4 mb-6">
         <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
+          value={selectedCategory}
+          onChange={(e) => setSelectedCategory(e.target.value)}
           className="p-2 border rounded"
         >
-          <option value="all">Tüm Duygular</option>
-          <option value="pozitif">Pozitif</option>
-          <option value="negatif">Negatif</option>
-          <option value="nötr">Nötr</option>
+          <option value="all">Tüm Kategoriler</option>
+          <option value={TweetCategories.POSITIVE}>Pozitif</option>
+          <option value={TweetCategories.NEUTRAL}>Nötr</option>
         </select>
 
         <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+          value={selectedType}
+          onChange={(e) => setSelectedType(e.target.value)}
           className="p-2 border rounded"
         >
           <option value="all">Tüm Tipler</option>
-          <option value="komik">Komik</option>
-          <option value="bilgilendirici">Bilgilendirici</option>
-          <option value="motivasyonel">Motivasyonel</option>
-          <option value="sanatsal">Sanatsal</option>
-          <option value="genel">Genel</option>
+          <option value={TweetCategories.MOTIVATIONAL}>Motivasyonel</option>
+          <option value={TweetCategories.FUNNY}>Komik</option>
+          <option value={TweetCategories.INFORMATIVE}>Bilgilendirici</option>
+          <option value={TweetCategories.ARTISTIC}>Sanatsal</option>
         </select>
       </div>
 
@@ -188,7 +195,7 @@ export default function ArchivePage() {
         {filteredTweets.map((tweet) => {
           const user = users[tweet.author_id];
           return (
-            <div key={tweet.id} className="bg-white rounded-lg shadow-md p-6">
+            <div key={tweet.id} className="bg-white p-4 rounded-lg shadow">
               {user && (
                 <div className="flex items-center mb-4">
                   <div className="relative w-12 h-12 mr-4">
@@ -210,16 +217,25 @@ export default function ArchivePage() {
               <p className="text-gray-800 mb-4">{tweet.text}</p>
               
               {tweet.sentiment && (
-                <div className="text-sm space-y-2">
-                  <p className={getSentimentColor(tweet.sentiment.category)}>
-                    Duygu: {tweet.sentiment.category} (Skor: {tweet.sentiment.score.toFixed(2)})
-                  </p>
-                  <p>
-                    Tip: {getTypeEmoji(tweet.sentiment.type)} {tweet.sentiment.type}
-                  </p>
-                  <div className="text-gray-500 text-xs space-y-1">
-                    <p>BERT Skoru: {tweet.sentiment.stats.bertScore.toFixed(2)} ({tweet.sentiment.stats.bertLabel})</p>
-                    <p>Emoji Skoru: {tweet.sentiment.stats.emojiScore.toFixed(2)} (Emoji Sayısı: {tweet.sentiment.stats.emojis})</p>
+                <div className="text-sm space-y-2 border-t pt-2">
+                  <div className="flex justify-between items-center">
+                    <p className={getCategoryColor(tweet.sentiment.category)}>
+                      Kategori: {tweet.sentiment.category}
+                    </p>
+                    <p>
+                      {getTypeEmoji(tweet.sentiment.type)} {tweet.sentiment.type}
+                    </p>
+                  </div>
+                  
+                  <div className="text-xs text-gray-500 space-y-1">
+                    <p>BERT: {(tweet.sentiment.stats.bertScore * 100).toFixed(1)}% {tweet.sentiment.stats.bertLabel}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <p>Motivasyonel: {(tweet.sentiment.stats.categoryScores.motivational * 100).toFixed(1)}%</p>
+                      <p>Komik: {(tweet.sentiment.stats.categoryScores.funny * 100).toFixed(1)}%</p>
+                      <p>Bilgilendirici: {(tweet.sentiment.stats.categoryScores.informative * 100).toFixed(1)}%</p>
+                      <p>Sanatsal: {(tweet.sentiment.stats.categoryScores.artistic * 100).toFixed(1)}%</p>
+                    </div>
+                    <p>Emoji Sayısı: {tweet.sentiment.stats.emojis}</p>
                   </div>
                 </div>
               )}
