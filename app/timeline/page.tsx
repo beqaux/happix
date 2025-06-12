@@ -5,7 +5,8 @@ import { useSession } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { format } from 'date-fns';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCcw } from 'lucide-react';
+import Link from 'next/link';
 
 interface Tweet {
   id: string;
@@ -40,16 +41,17 @@ interface Stats {
 }
 
 export default function TimelinePage() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const [tweets, setTweets] = useState<Tweet[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [nextToken, setNextToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [threshold, setThreshold] = useState(70); // Varsayılan pozitiflik eşiği %70
+  const [threshold, setThreshold] = useState(70);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const fetchTimeline = async (cursor?: string) => {
+  const fetchTimeline = async (cursor?: string, shouldRefresh = false) => {
     try {
       setLoading(true);
       setError(null);
@@ -67,14 +69,24 @@ export default function TimelinePage() {
         throw new Error(data.error || 'Failed to fetch timeline');
       }
 
-      setTweets(prev => cursor ? [...prev, ...data.tweets] : data.tweets);
+      if (shouldRefresh) {
+        setTweets(data.tweets);
+      } else {
+        setTweets(prev => cursor ? [...prev, ...data.tweets] : data.tweets);
+      }
+      
       setUsers(data.users);
       setNextToken(data.next_token);
       setStats(data.stats);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred');
+      if (err instanceof Error && err.message.includes('session has expired')) {
+        // Oturumu yenile
+        window.location.href = '/api/auth/signin';
+      }
     } finally {
       setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -82,7 +94,12 @@ export default function TimelinePage() {
     if (session) {
       fetchTimeline();
     }
-  }, [session, threshold]); // threshold değiştiğinde yeniden yükle
+  }, [session, threshold]);
+
+  const handleRefresh = () => {
+    setIsRefreshing(true);
+    fetchTimeline(undefined, true);
+  };
 
   const getSentimentColor = (score: number) => {
     if (score >= 0.8) return 'bg-green-100 text-green-800';
@@ -90,10 +107,21 @@ export default function TimelinePage() {
     return 'bg-blue-100 text-blue-800';
   };
 
-  if (!session) {
+  if (status === 'loading') {
     return (
       <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4">
         <p className="text-lg text-gray-600">Please sign in to view your timeline.</p>
+        <Button asChild>
+          <Link href="/api/auth/signin">Sign In</Link>
+        </Button>
       </div>
     );
   }
@@ -101,7 +129,22 @@ export default function TimelinePage() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8">
-        <h1 className="text-3xl font-bold">Positive Timeline</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold">Positive Timeline</h1>
+          <Button
+            onClick={handleRefresh}
+            variant="outline"
+            size="sm"
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCcw className="mr-2 h-4 w-4" />
+            )}
+            Refresh
+          </Button>
+        </div>
         
         <div className="mt-4 max-w-xl">
           <label className="mb-2 block text-sm font-medium text-gray-700">
@@ -130,6 +173,21 @@ export default function TimelinePage() {
       {error && (
         <div className="mb-4 rounded-lg bg-red-100 p-4 text-red-700">
           {error}
+          {error.includes('session has expired') && (
+            <Button
+              onClick={() => window.location.href = '/api/auth/signin'}
+              variant="link"
+              className="ml-2 text-red-700 underline"
+            >
+              Yeniden Giriş Yap
+            </Button>
+          )}
+        </div>
+      )}
+
+      {tweets.length === 0 && !loading && !error && (
+        <div className="rounded-lg bg-yellow-50 p-4 text-yellow-800">
+          Henüz gösterilecek tweet yok. Eşik değerini düşürmeyi veya yenilemeyi deneyin.
         </div>
       )}
 
