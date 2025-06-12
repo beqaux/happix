@@ -28,6 +28,18 @@ function parseRateLimitReset(resetHeader: string | null): Date | null {
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 dakika
 let lastRequestTime: number | null = null;
 
+// Twitter API'den gelen reset timestamp'i saniyeye çevirme
+function calculateRetryAfterSeconds(resetTimestamp: string | number): number {
+  if (typeof resetTimestamp === 'string') {
+    // ISO string ise
+    const resetDate = new Date(resetTimestamp).getTime();
+    const now = Date.now();
+    return Math.max(0, Math.ceil((resetDate - now) / 1000));
+  }
+  // Unix timestamp ise
+  return Math.max(0, Math.ceil(Number(resetTimestamp) - Date.now() / 1000));
+}
+
 export async function GET(request: NextRequest) {
   try {
     // Get the user session
@@ -52,12 +64,12 @@ export async function GET(request: NextRequest) {
     // Rate limit kontrolü
     const now = Date.now();
     if (lastRequestTime && now - lastRequestTime < RATE_LIMIT_WINDOW) {
-      const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - lastRequestTime)) / 1000);
+      const retryAfterSeconds = Math.ceil((RATE_LIMIT_WINDOW - (now - lastRequestTime)) / 1000);
       return NextResponse.json(
         { 
           error: 'Rate limit exceeded',
-          retryAfter,
-          message: `Please wait ${retryAfter} seconds before trying again.`
+          retryAfter: retryAfterSeconds,
+          message: `Lütfen ${retryAfterSeconds} saniye sonra tekrar deneyin.`
         },
         { status: 429 }
       );
@@ -105,30 +117,19 @@ export async function GET(request: NextRequest) {
         });
 
         if (response.status === 429) {
-          const waitTime = rateLimitReset 
-            ? Math.max(0, rateLimitReset.getTime() - Date.now())
-            : BASE_DELAY * Math.pow(2, retryCount); // Exponential backoff
-          
-          if (waitTime > 30000) { // If wait time is more than 30 seconds
-            return NextResponse.json({
-              error: "Rate limit exceeded",
-              retryAfter: rateLimitReset?.toISOString() || 'a few minutes',
-              message: "We've hit X's rate limit. Please try again later."
-            }, { 
-              status: 429,
-              headers: rateLimitReset ? {
-                'Retry-After': Math.ceil(waitTime / 1000).toString()
-              } : {}
-            });
-          }
-          
-          console.log(`Rate limited. Waiting ${Math.ceil(waitTime / 1000)} seconds...`);
-          
-          if (retryCount < MAX_RETRY_COUNT) {
-            await sleep(waitTime);
-            retryCount++;
-            continue;
-          }
+          const resetTimestamp = response.headers.get('x-rate-limit-reset');
+          const retryAfterSeconds = resetTimestamp ? 
+            calculateRetryAfterSeconds(resetTimestamp) : 
+            60; // Varsayılan olarak 60 saniye
+
+          return NextResponse.json(
+            { 
+              error: 'Twitter API rate limit exceeded',
+              retryAfter: retryAfterSeconds,
+              message: `Twitter API rate limit aşıldı. Lütfen ${retryAfterSeconds} saniye sonra tekrar deneyin.`
+            },
+            { status: 429 }
+          );
         }
 
         if (!response.ok) {
@@ -187,7 +188,8 @@ export async function GET(request: NextRequest) {
           next_token: data.meta?.next_token,
           _meta: {
             lastRequestTime: now,
-            nextAllowedTime: now + RATE_LIMIT_WINDOW
+            nextAllowedTime: now + RATE_LIMIT_WINDOW,
+            nextAllowedTimeFormatted: new Date(now + RATE_LIMIT_WINDOW).toLocaleString()
           }
         });
 

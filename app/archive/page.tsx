@@ -130,7 +130,16 @@ export default function ArchivePage() {
     if (!retryAfter || !lastRefreshTime) return 0;
     const now = new Date();
     const timeSinceLastRefresh = (now.getTime() - lastRefreshTime.getTime()) / 1000;
-    return Math.max(0, retryAfter - timeSinceLastRefresh);
+    return Math.max(0, Math.ceil(retryAfter - timeSinceLastRefresh));
+  };
+
+  // Kalan süreyi formatla
+  const formatTimeLeft = (seconds: number) => {
+    if (seconds <= 0) return '0 saniye';
+    if (seconds < 60) return `${seconds} saniye`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${minutes} dakika ${remainingSeconds} saniye`;
   };
 
   const filteredTweets = tweets.filter(tweet => {
@@ -199,14 +208,21 @@ export default function ArchivePage() {
         <h1 className="text-2xl font-bold">Tweet Arşivim</h1>
         
         {/* Refresh Butonu */}
-        <Button
-          onClick={() => fetchTweets(true)}
-          disabled={loading || getRefreshTimeLeft() > 0}
-          className="flex items-center gap-2"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-          {loading ? 'Yükleniyor...' : 'Yenile'}
-        </Button>
+        <div className="flex flex-col items-end">
+          <Button
+            onClick={() => fetchTweets(true)}
+            disabled={loading || getRefreshTimeLeft() > 0}
+            className="flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            {loading ? 'Yükleniyor...' : 'Yenile'}
+          </Button>
+          {getRefreshTimeLeft() > 0 && (
+            <p className="text-sm text-gray-500 mt-1">
+              {formatTimeLeft(getRefreshTimeLeft())} sonra tekrar deneyebilirsiniz
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Son Yenileme Zamanı */}
