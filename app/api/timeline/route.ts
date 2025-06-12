@@ -23,6 +23,53 @@ interface User {
   profile_image_url?: string;
 }
 
+// Rate limit yönetimi için yardımcı fonksiyonlar
+async function fetchWithRetry(url: string, options: RequestInit, maxRetries = 3) {
+  let lastError;
+  let waitTime = 1000; // Başlangıç bekleme süresi: 1 saniye
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      
+      // Rate limit headers'ı kontrol et
+      const remaining = response.headers.get('x-rate-limit-remaining');
+      const reset = response.headers.get('x-rate-limit-reset');
+      
+      if (remaining && parseInt(remaining) < 2) {
+        console.warn(`Rate limit almost exceeded. ${remaining} requests remaining. Reset at ${new Date(parseInt(reset!) * 1000)}`);
+      }
+
+      if (response.status === 429) {
+        // Rate limit aşıldı, bekleme süresini hesapla
+        const resetTime = reset ? parseInt(reset) * 1000 : Date.now() + waitTime;
+        const waitDuration = Math.max(0, resetTime - Date.now());
+        
+        console.warn(`Rate limit exceeded. Waiting ${waitDuration}ms before retry...`);
+        await new Promise(resolve => setTimeout(resolve, waitDuration));
+        continue;
+      }
+
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+
+      return response;
+    } catch (error) {
+      console.error(`Attempt ${i + 1} failed:`, error);
+      lastError = error;
+      
+      if (i < maxRetries - 1) {
+        // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+        waitTime *= 2; // Her denemede bekleme süresini 2'ye katla
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -44,37 +91,27 @@ export async function GET(req: NextRequest) {
     const threshold = parseFloat(searchParams.get('threshold') || '0.7');
 
     // Kullanıcının kendi tweet'lerini al
-    const userTweetsResponse = await fetch(
-      `https://api.twitter.com/2/users/${session.user.id}/tweets?max_results=10&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
+    const userTweetsResponse = await fetchWithRetry(
+      `https://api.twitter.com/2/users/${session.user.id}/tweets?max_results=5&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
       {
         headers: {
           'Authorization': `Bearer ${session.accessToken}`,
         },
       }
     );
-
-    if (!userTweetsResponse.ok) {
-      console.error('Failed to fetch user tweets:', await userTweetsResponse.text());
-      throw new Error('Failed to fetch user tweets');
-    }
 
     const userTweetsData = await userTweetsResponse.json();
     const userTweets = userTweetsData.data || [];
 
     // Kullanıcının beğendiği tweet'leri al
-    const likedTweetsResponse = await fetch(
-      `https://api.twitter.com/2/users/${session.user.id}/liked_tweets?max_results=10&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
+    const likedTweetsResponse = await fetchWithRetry(
+      `https://api.twitter.com/2/users/${session.user.id}/liked_tweets?max_results=5&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
       {
         headers: {
           'Authorization': `Bearer ${session.accessToken}`,
         },
       }
     );
-
-    if (!likedTweetsResponse.ok) {
-      console.error('Failed to fetch liked tweets:', await likedTweetsResponse.text());
-      throw new Error('Failed to fetch liked tweets');
-    }
 
     const likedTweetsData = await likedTweetsResponse.json();
     const likedTweets = likedTweetsData.data || [];
