@@ -37,10 +37,15 @@ export default function ArchivePage() {
   const [users, setUsers] = useState<{ [key: string]: User }>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number>(0);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
+  const [cacheInfo, setCacheInfo] = useState<{
+    fromCache: boolean;
+    cacheAge?: number;
+    message?: string;
+  } | null>(null);
 
   // Local Storage Keys
   const STORAGE_KEYS = {
@@ -90,16 +95,20 @@ export default function ArchivePage() {
     setError(null);
 
     try {
-      const response = await fetch('/api/tweets');
+      const url = new URL('/api/tweets', window.location.origin);
+      if (forceRefresh) {
+        url.searchParams.set('refresh', 'true');
+      }
+
+      const response = await fetch(url);
       const data = await response.json();
 
       if (!response.ok) {
-        if (response.status === 429) { // Rate Limit
-          const retryAfter = data.retryAfter || 60;
-          setRetryAfter(retryAfter);
-          setError(`Rate limit aşıldı. Lütfen ${Math.ceil(retryAfter)} saniye sonra tekrar deneyin.`);
+        if (response.status === 429) {
+          setRetryAfter(data.retryAfter || 60);
+          setError(data.message || 'Rate limit aşıldı. Lütfen daha sonra tekrar deneyin.');
         } else {
-          setError(data.error || 'Bir hata oluştu');
+          setError(data.error || 'Tweet\'ler alınırken bir hata oluştu');
         }
         setLoading(false);
         return;
@@ -109,13 +118,21 @@ export default function ArchivePage() {
       setUsers(data.users);
       saveToStorage(data.tweets, data.users);
       setLastRefreshTime(new Date());
-      setRetryAfter(null);
-    } catch (error) {
-      setError('Bir hata oluştu');
-      console.error('Error fetching tweets:', error);
-    }
+      setCacheInfo({
+        fromCache: data._meta.fromCache,
+        cacheAge: data._meta.cacheAge,
+        message: data._meta.message
+      });
 
-    setLoading(false);
+      if (data._meta.retryAfter) {
+        setRetryAfter(data._meta.retryAfter);
+      }
+    } catch (error) {
+      setError('Tweet\'ler alınırken bir hata oluştu');
+      console.error('Error fetching tweets:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // İlk yükleme
@@ -140,6 +157,13 @@ export default function ArchivePage() {
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = seconds % 60;
     return `${minutes} dakika ${remainingSeconds} saniye`;
+  };
+
+  // Cache yaşını formatla
+  const formatCacheAge = (seconds: number) => {
+    if (seconds < 60) return `${seconds} saniye`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)} dakika`;
+    return `${Math.floor(seconds / 3600)} saat ${Math.floor((seconds % 3600) / 60)} dakika`;
   };
 
   const filteredTweets = tweets.filter(tweet => {
@@ -192,7 +216,7 @@ export default function ArchivePage() {
     return (
       <div className="p-4">
         <p className="text-red-500">{error}</p>
-        {retryAfter && (
+        {retryAfter > 0 && (
           <p>Please wait {retryAfter} seconds before trying again.</p>
         )}
         <Button onClick={() => fetchTweets(true)} className="mt-2">
@@ -224,6 +248,23 @@ export default function ArchivePage() {
           )}
         </div>
       </div>
+
+      {/* Cache Durumu */}
+      {cacheInfo && (
+        <div className={`rounded-lg p-4 mb-4 ${cacheInfo.fromCache ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
+          <p>
+            {cacheInfo.fromCache ? (
+              <>
+                <span className="font-medium">Cache'lenmiş veriler gösteriliyor. </span>
+                {cacheInfo.cacheAge && `(${formatCacheAge(cacheInfo.cacheAge)} önce cache'lendi)`}
+              </>
+            ) : (
+              <span className="font-medium">Yeni veriler başarıyla çekildi.</span>
+            )}
+          </p>
+          {cacheInfo.message && <p className="mt-1 text-sm">{cacheInfo.message}</p>}
+        </div>
+      )}
 
       {/* Son Yenileme Zamanı */}
       {lastRefreshTime && (

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { analyzeSentiment } from '@/lib/sentiment';
+import { createTweetsTable, cacheTweets, getCachedTweets, getCacheAge } from '@/lib/db';
 
 // Retry configuration
 const MAX_RETRY_COUNT = 2;
@@ -26,17 +27,15 @@ function parseRateLimitReset(resetHeader: string | null): Date | null {
 
 // Rate limit kontrolü için
 const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 dakika
-let lastRequestTime: number | null = null;
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 saat
 
 // Twitter API'den gelen reset timestamp'i saniyeye çevirme
 function calculateRetryAfterSeconds(resetTimestamp: string | number): number {
   if (typeof resetTimestamp === 'string') {
-    // ISO string ise
     const resetDate = new Date(resetTimestamp).getTime();
     const now = Date.now();
     return Math.max(0, Math.ceil((resetDate - now) / 1000));
   }
-  // Unix timestamp ise
   return Math.max(0, Math.ceil(Number(resetTimestamp) - Date.now() / 1000));
 }
 
@@ -57,14 +56,38 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // Veritabanı tablolarını oluştur
+    await createTweetsTable();
+
+    // Önce cache'i kontrol et
+    const lastCacheTime = await getCacheAge();
+    const forceRefresh = new URL(request.url).searchParams.get('refresh') === 'true';
+    
+    if (lastCacheTime && !forceRefresh) {
+      const cacheAge = Date.now() - new Date(lastCacheTime).getTime();
+      
+      // Cache yeterince yeniyse, cache'den döndür
+      if (cacheAge < CACHE_TTL) {
+        const cachedTweets = await getCachedTweets(session.user.id);
+        return NextResponse.json({
+          tweets: cachedTweets,
+          _meta: {
+            fromCache: true,
+            cacheAge: Math.floor(cacheAge / 1000),
+            nextRefreshAvailable: new Date(lastCacheTime.getTime() + RATE_LIMIT_WINDOW).toLocaleString()
+          }
+        });
+      }
+    }
+
     // Get cursor from query params
     const searchParams = request.nextUrl.searchParams;
     const cursor = searchParams.get("cursor");
 
     // Rate limit kontrolü
     const now = Date.now();
-    if (lastRequestTime && now - lastRequestTime < RATE_LIMIT_WINDOW) {
-      const retryAfterSeconds = Math.ceil((RATE_LIMIT_WINDOW - (now - lastRequestTime)) / 1000);
+    if (now - now < RATE_LIMIT_WINDOW) {
+      const retryAfterSeconds = Math.ceil((RATE_LIMIT_WINDOW - (now - now)) / 1000);
       return NextResponse.json(
         { 
           error: 'Rate limit exceeded',
@@ -122,6 +145,22 @@ export async function GET(request: NextRequest) {
             calculateRetryAfterSeconds(resetTimestamp) : 
             60; // Varsayılan olarak 60 saniye
 
+          // Rate limit aşıldıysa ve cache varsa, cache'den döndür
+          if (lastCacheTime) {
+            const cachedTweets = await getCachedTweets(session.user.id);
+            if (cachedTweets.length > 0) {
+              return NextResponse.json({
+                tweets: cachedTweets,
+                _meta: {
+                  fromCache: true,
+                  rateLimited: true,
+                  retryAfter: retryAfterSeconds,
+                  message: `Rate limit aşıldı. Cache'lenmiş tweet'ler gösteriliyor. ${retryAfterSeconds} saniye sonra yeni tweet'leri çekebilirsiniz.`
+                }
+              });
+            }
+          }
+
           return NextResponse.json(
             { 
               error: 'Twitter API rate limit exceeded',
@@ -178,8 +217,8 @@ export async function GET(request: NextRequest) {
           return acc;
         }, {});
 
-        // Son istek zamanını güncelle
-        lastRequestTime = now;
+        // Tweet'leri ve kullanıcıları cache'le
+        await cacheTweets(tweetsWithSentiment, data.includes.users);
 
         // Return tweets and pagination info
         return NextResponse.json({
@@ -189,7 +228,10 @@ export async function GET(request: NextRequest) {
           _meta: {
             lastRequestTime: now,
             nextAllowedTime: now + RATE_LIMIT_WINDOW,
-            nextAllowedTimeFormatted: new Date(now + RATE_LIMIT_WINDOW).toLocaleString()
+            nextAllowedTimeFormatted: new Date(now + RATE_LIMIT_WINDOW).toLocaleString(),
+            fromCache: false,
+            refreshedAt: new Date().toISOString(),
+            nextRefreshAvailable: new Date(Date.now() + RATE_LIMIT_WINDOW).toLocaleString()
           }
         });
 
