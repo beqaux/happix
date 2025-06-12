@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import { analyzeSentiment } from '@/lib/sentiment';
 
 // Retry configuration
 const MAX_RETRY_COUNT = 2;
@@ -23,6 +24,10 @@ function parseRateLimitReset(resetHeader: string | null): Date | null {
   return resetDate;
 }
 
+// Rate limit kontrolü için
+const RATE_LIMIT_WINDOW = 15 * 60 * 1000; // 15 dakika
+let lastRequestTime: number | null = null;
+
 export async function GET(request: NextRequest) {
   try {
     // Get the user session
@@ -43,6 +48,20 @@ export async function GET(request: NextRequest) {
     // Get cursor from query params
     const searchParams = request.nextUrl.searchParams;
     const cursor = searchParams.get("cursor");
+
+    // Rate limit kontrolü
+    const now = Date.now();
+    if (lastRequestTime && now - lastRequestTime < RATE_LIMIT_WINDOW) {
+      const retryAfter = Math.ceil((RATE_LIMIT_WINDOW - (now - lastRequestTime)) / 1000);
+      return NextResponse.json(
+        { 
+          error: 'Rate limit exceeded',
+          retryAfter,
+          message: `Please wait ${retryAfter} seconds before trying again.`
+        },
+        { status: 429 }
+      );
+    }
 
     // X API endpoint for liked tweets
     const endpoint = `https://api.twitter.com/2/users/${session.user.id}/liked_tweets`;
@@ -144,11 +163,32 @@ export async function GET(request: NextRequest) {
           hasNextToken: !!data.meta?.next_token
         });
 
+        // Tweet'lere duygu analizi ekle
+        const tweetsWithSentiment = await Promise.all(
+          data.data.map(async (tweet: any) => {
+            const sentiment = await analyzeSentiment(tweet.text);
+            return { ...tweet, sentiment };
+          })
+        );
+
+        // Kullanıcı bilgilerini düzenle
+        const users = data.includes.users.reduce((acc: any, user: any) => {
+          acc[user.id] = user;
+          return acc;
+        }, {});
+
+        // Son istek zamanını güncelle
+        lastRequestTime = now;
+
         // Return tweets and pagination info
         return NextResponse.json({
-          tweets: data.data || [],
-          users: data.includes?.users || [],
+          tweets: tweetsWithSentiment,
+          users,
           next_token: data.meta?.next_token,
+          _meta: {
+            lastRequestTime: now,
+            nextAllowedTime: now + RATE_LIMIT_WINDOW
+          }
         });
 
       } catch (error) {

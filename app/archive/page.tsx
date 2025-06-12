@@ -7,6 +7,7 @@ import Image from "next/image";
 import { Tweet } from '../../types/tweet';
 import { User } from '../../types/user';
 import { TweetCategories } from '@/lib/sentiment';
+import { RefreshCw } from 'lucide-react';
 
 interface SentimentAnalysis {
   score: number;
@@ -39,68 +40,97 @@ export default function ArchivePage() {
   const [retryAfter, setRetryAfter] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date | null>(null);
 
+  // Local Storage Keys
+  const STORAGE_KEYS = {
+    TWEETS: 'happix_tweets',
+    USERS: 'happix_users',
+    LAST_REFRESH: 'happix_last_refresh'
+  };
+
+  // Veriyi Local Storage'dan yükleme
   useEffect(() => {
-    if (session?.accessToken) {
+    const loadFromStorage = () => {
+      try {
+        const storedTweets = localStorage.getItem(STORAGE_KEYS.TWEETS);
+        const storedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+        const storedLastRefresh = localStorage.getItem(STORAGE_KEYS.LAST_REFRESH);
+
+        if (storedTweets && storedUsers) {
+          setTweets(JSON.parse(storedTweets));
+          setUsers(JSON.parse(storedUsers));
+          setLastRefreshTime(storedLastRefresh ? new Date(storedLastRefresh) : null);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error loading from storage:', error);
+      }
+    };
+
+    loadFromStorage();
+  }, []);
+
+  // Veriyi Local Storage'a kaydetme
+  const saveToStorage = (newTweets: TweetWithSentiment[], newUsers: { [key: string]: User }) => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.TWEETS, JSON.stringify(newTweets));
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(newUsers));
+      localStorage.setItem(STORAGE_KEYS.LAST_REFRESH, new Date().toISOString());
+    } catch (error) {
+      console.error('Error saving to storage:', error);
+    }
+  };
+
+  // Tweet'leri çekme fonksiyonu
+  const fetchTweets = async (forceRefresh = false) => {
+    if (!session) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch('/api/tweets');
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (response.status === 429) { // Rate Limit
+          const retryAfter = data.retryAfter || 60;
+          setRetryAfter(retryAfter);
+          setError(`Rate limit aşıldı. Lütfen ${Math.ceil(retryAfter)} saniye sonra tekrar deneyin.`);
+        } else {
+          setError(data.error || 'Bir hata oluştu');
+        }
+        setLoading(false);
+        return;
+      }
+
+      setTweets(data.tweets);
+      setUsers(data.users);
+      saveToStorage(data.tweets, data.users);
+      setLastRefreshTime(new Date());
+      setRetryAfter(null);
+    } catch (error) {
+      setError('Bir hata oluştu');
+      console.error('Error fetching tweets:', error);
+    }
+
+    setLoading(false);
+  };
+
+  // İlk yükleme
+  useEffect(() => {
+    if (session && tweets.length === 0) {
       fetchTweets();
     }
   }, [session]);
 
-  const fetchTweets = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      const response = await fetch('/api/tweets');
-      
-      if (!response.ok) {
-        if (response.status === 429) {
-          const retryAfter = parseInt(response.headers.get('retry-after') || '60');
-          setRetryAfter(retryAfter);
-          throw new Error(`Rate limit exceeded. Try again in ${retryAfter} seconds.`);
-        }
-        throw new Error('Failed to fetch tweets');
-      }
-
-      const data = await response.json();
-      
-      // Her tweet için duygu analizi yap
-      const tweetsWithSentiment = await Promise.all(
-        data.tweets.map(async (tweet: Tweet) => {
-          try {
-            const sentimentResponse = await fetch('/api/sentiment', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ text: tweet.text }),
-            });
-
-            if (sentimentResponse.ok) {
-              const sentiment = await sentimentResponse.json();
-              return { ...tweet, sentiment };
-            }
-            return tweet;
-          } catch (error) {
-            console.error('Error analyzing tweet:', error);
-            return tweet;
-          }
-        })
-      );
-
-      setTweets(tweetsWithSentiment);
-      
-      // Kullanıcı bilgilerini güncelle
-      const usersObj = data.users.reduce((acc: { [key: string]: User }, user: User) => {
-        acc[user.id] = user;
-        return acc;
-      }, {});
-      setUsers(prev => ({ ...prev, ...usersObj }));
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'An error occurred');
-    } finally {
-      setLoading(false);
-    }
+  // Refresh butonu için kalan süre hesaplama
+  const getRefreshTimeLeft = () => {
+    if (!retryAfter || !lastRefreshTime) return 0;
+    const now = new Date();
+    const timeSinceLastRefresh = (now.getTime() - lastRefreshTime.getTime()) / 1000;
+    return Math.max(0, retryAfter - timeSinceLastRefresh);
   };
 
   const filteredTweets = tweets.filter(tweet => {
@@ -156,7 +186,7 @@ export default function ArchivePage() {
         {retryAfter && (
           <p>Please wait {retryAfter} seconds before trying again.</p>
         )}
-        <Button onClick={fetchTweets} className="mt-2">
+        <Button onClick={() => fetchTweets(true)} className="mt-2">
           Retry
         </Button>
       </div>
@@ -165,8 +195,27 @@ export default function ArchivePage() {
 
   return (
     <div className="container mx-auto p-4">
-      <h1 className="text-2xl font-bold mb-6">Tweet Arşivim</h1>
-      
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Tweet Arşivim</h1>
+        
+        {/* Refresh Butonu */}
+        <Button
+          onClick={() => fetchTweets(true)}
+          disabled={loading || getRefreshTimeLeft() > 0}
+          className="flex items-center gap-2"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          {loading ? 'Yükleniyor...' : 'Yenile'}
+        </Button>
+      </div>
+
+      {/* Son Yenileme Zamanı */}
+      {lastRefreshTime && (
+        <p className="text-sm text-gray-500 mb-4">
+          Son yenileme: {lastRefreshTime.toLocaleTimeString()}
+        </p>
+      )}
+
       <div className="flex gap-4 mb-6">
         <select
           value={selectedCategory}
