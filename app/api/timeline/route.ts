@@ -10,6 +10,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Session'da hata varsa (örn: token yenileme hatası)
+    if (session.error === 'RefreshAccessTokenError') {
+      return NextResponse.json(
+        { error: "Your session has expired. Please sign in again." },
+        { status: 401 }
+      );
+    }
+
     // URL'den parametreleri al
     const { searchParams } = new URL(req.url);
     const cursor = searchParams.get('cursor');
@@ -36,7 +44,18 @@ export async function GET(req: NextRequest) {
     });
 
     if (!response.ok) {
-      throw new Error(`Twitter API error: ${response.status}`);
+      // API hatası detaylarını al
+      const error = await response.json();
+      console.error('Twitter API error:', error);
+
+      if (response.status === 401) {
+        return NextResponse.json(
+          { error: "Your session has expired. Please sign in again." },
+          { status: 401 }
+        );
+      }
+
+      throw new Error(`Twitter API error: ${error.detail || error.message || response.statusText}`);
     }
 
     const data = await response.json();

@@ -16,15 +16,9 @@ interface ExtendedSession extends Session {
 export const authOptions: NextAuthOptions = {
   providers: [
     TwitterProvider({
-      clientId: process.env.TWITTER_CLIENT_ID as string,
-      clientSecret: process.env.TWITTER_CLIENT_SECRET as string,
+      clientId: process.env.TWITTER_CLIENT_ID!,
+      clientSecret: process.env.TWITTER_CLIENT_SECRET!,
       version: "2.0",
-      authorization: {
-        url: "https://twitter.com/i/oauth2/authorize",
-        params: {
-          scope: "tweet.read users.read like.read offline.access",
-        },
-      },
     }),
   ],
   pages: {
@@ -32,52 +26,65 @@ export const authOptions: NextAuthOptions = {
   },
   debug: true,
   callbacks: {
-    async jwt({ token, account, profile }) {
-      console.log('JWT Callback:', { 
-        hasToken: !!token,
-        hasAccount: !!account,
-        hasProfile: !!profile,
-        accountTokens: account ? {
-          hasAccessToken: !!account.access_token,
-          hasRefreshToken: !!account.refresh_token,
-          tokenType: account.token_type,
-        } : null
-      });
-
-      // Save token for X API
+    async jwt({ token, account }) {
+      // İlk giriş yapıldığında token'a access token ve refresh token ekle
       if (account) {
         token.accessToken = account.access_token;
         token.refreshToken = account.refresh_token;
-        token.tokenType = account.token_type;
-        // Twitter API v2 returns the user ID directly in the profile
-        token.id = (profile as TwitterProfile)?.data?.id || profile?.sub;
+        token.expiresAt = account.expires_at! * 1000; // Unix timestamp'i milisaniyeye çevir
       }
+
+      // Token süresi dolmuşsa yenile
+      if (Date.now() > (token.expiresAt as number)) {
+        try {
+          const response = await fetch('https://api.twitter.com/2/oauth2/token', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+              grant_type: 'refresh_token',
+              client_id: process.env.TWITTER_CLIENT_ID!,
+              client_secret: process.env.TWITTER_CLIENT_SECRET!,
+              refresh_token: token.refreshToken as string,
+            }),
+          });
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw data;
+          }
+
+          return {
+            ...token,
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token ?? token.refreshToken,
+            expiresAt: Date.now() + data.expires_in * 1000,
+          };
+        } catch (error) {
+          console.error('Error refreshing token:', error);
+          return { ...token, error: 'RefreshAccessTokenError' };
+        }
+      }
+
       return token;
     },
-    async session({ session, token }: { session: Session; token: JWT }) {
-      console.log('Session Callback:', {
-        hasSession: !!session,
-        hasToken: !!token,
-        sessionUser: session?.user ? {
-          hasId: !!session.user.id,
-          hasName: !!session.user.name,
-          hasEmail: !!session.user.email,
-        } : null,
-        tokenData: {
-          hasAccessToken: !!token.accessToken,
-          hasRefreshToken: !!token.refreshToken,
-          tokenType: token.tokenType,
-          hasId: !!token.id,
+    async session({ session, token }) {
+      // Session'a access token'ı ekle
+      return {
+        ...session,
+        accessToken: token.accessToken,
+        error: token.error,
+        user: {
+          ...session.user,
+          id: token.sub, // Twitter user ID'sini ekle
         }
-      });
-
-      // Add token to session
-      if (session.user) {
-        session.user.id = token.id as string;
-      }
-      const extendedSession = session as ExtendedSession;
-      extendedSession.accessToken = token.accessToken as string;
-      return extendedSession;
+      };
     },
+  },
+  session: {
+    strategy: 'jwt',
+    maxAge: 24 * 60 * 60, // 24 saat
   },
 }; 
