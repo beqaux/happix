@@ -11,17 +11,23 @@ export default function Home() {
         
         <p className="max-w-prose text-lg text-muted-foreground sm:text-xl">
           Save your positive memories from X, organize them and rediscover them whenever you want.
-          The posts you like, get inspired by, and make you happy will no longer be lost.
+          Filter out negative content and focus on what makes you happy.
         </p>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row">
           <Button asChild size="lg">
-            <Link href="/login">
-              Sign in with X
+            <Link href="/timeline">
+              View Positive Timeline
             </Link>
           </Button>
           
-          <Button variant="outline" asChild size="lg">
+          <Button asChild size="lg" variant="outline">
+            <Link href="/archive">
+              Browse Liked Tweets
+            </Link>
+          </Button>
+          
+          <Button variant="ghost" asChild size="lg">
             <Link href="/about">
               Learn More
             </Link>

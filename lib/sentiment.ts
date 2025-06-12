@@ -1,12 +1,17 @@
 import { pipeline, env } from '@xenova/transformers';
 
-interface SentimentResult {
-  label: string;
-  score: number;
-}
+// Modeli sunucu tarafında çalıştırmak için gerekli
+env.useBrowserCache = false;
+env.allowLocalModels = false;
 
-// Modeli yüklemek için yardımcı fonksiyon
+// Sentiment analizi için pipeline
 let sentimentPipeline: any = null;
+
+export interface SentimentResult {
+  label: 'positive' | 'negative' | 'neutral';
+  score: number;
+  confidence: number;
+}
 
 // Tweet kategorileri
 export const TweetCategories = {
@@ -49,7 +54,7 @@ const positiveEmojiGroups = {
 async function initializePipeline() {
   if (!sentimentPipeline) {
     env.backends.onnx.wasm.numThreads = 1;
-    sentimentPipeline = await pipeline('sentiment-analysis', 'dbmdz/bert-base-turkish-sentiment');
+    sentimentPipeline = await pipeline('sentiment-analysis', 'Xenova/distilbert-base-uncased-finetuned-sst-2-english');
   }
   return sentimentPipeline;
 }
@@ -82,37 +87,30 @@ function detectEmojis(text: string): string[] {
   return text.match(emojiRegex) || [];
 }
 
-export async function analyzeSentiment(text: string) {
-  const pipeline = await initializePipeline();
-  const result = await pipeline(text);
-  const emojis = detectEmojis(text);
-
-  // Kategori skorlarını hesapla
-  const categoryScores = {
-    motivational: calculateCategoryScore(text, emojis, 'motivational'),
-    funny: calculateCategoryScore(text, emojis, 'funny'),
-    informative: calculateCategoryScore(text, emojis, 'informative'),
-    artistic: calculateCategoryScore(text, emojis, 'artistic')
-  };
-
-  // En yüksek kategori skorunu bul
-  const topCategory = Object.entries(categoryScores)
-    .reduce((a, b) => a[1] > b[1] ? a : b)[0];
-
-  // BERT skoru pozitifse ve kategori skoru yeterince yüksekse
-  const isBertPositive = result[0].label === 'positive' && result[0].score > 0.7;
-  const hasCategoryMatch = categoryScores[topCategory as keyof typeof categoryScores] > 0.5;
-
-  return {
-    score: result[0].score,
-    category: isBertPositive ? TweetCategories.POSITIVE : TweetCategories.NEUTRAL,
-    type: hasCategoryMatch ? TweetCategories[topCategory.toUpperCase() as keyof typeof TweetCategories] : TweetCategories.NEUTRAL,
-    stats: {
-      bertScore: result[0].score,
-      bertLabel: result[0].label,
-      categoryScores,
-      topCategory,
-      emojis: emojis.length
+export async function analyzeSentiment(text: string): Promise<SentimentResult> {
+  try {
+    // Pipeline'ı ilk kullanımda yükle (lazy loading)
+    if (!sentimentPipeline) {
+      sentimentPipeline = await pipeline('sentiment-analysis', 'Xenova/distilbert-base-uncased-finetuned-sst-2-english');
     }
-  };
+
+    // Metni analiz et
+    const result = await sentimentPipeline(text);
+    const sentiment = result[0];
+
+    // Sonucu normalize et
+    return {
+      label: sentiment.label.toLowerCase() as 'positive' | 'negative' | 'neutral',
+      score: sentiment.score,
+      confidence: sentiment.score
+    };
+  } catch (error) {
+    console.error('Duygu analizi sırasında hata:', error);
+    // Hata durumunda nötr döndür
+    return {
+      label: 'neutral',
+      score: 0.5,
+      confidence: 0
+    };
+  }
 } 

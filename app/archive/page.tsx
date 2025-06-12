@@ -8,6 +8,7 @@ import { Tweet } from '../../types/tweet';
 import { User } from '../../types/user';
 import { TweetCategories } from '@/lib/sentiment';
 import { RefreshCw } from 'lucide-react';
+import { format } from 'date-fns';
 
 interface SentimentAnalysis {
   score: number;
@@ -46,6 +47,7 @@ export default function ArchivePage() {
     cacheAge?: number;
     message?: string;
   } | null>(null);
+  const [nextToken, setNextToken] = useState<string | null>(null);
 
   // Local Storage Keys
   const STORAGE_KEYS = {
@@ -88,7 +90,7 @@ export default function ArchivePage() {
   };
 
   // Tweet'leri çekme fonksiyonu
-  const fetchTweets = async (forceRefresh = false) => {
+  const fetchTweets = async (forceRefresh = false, cursor?: string) => {
     if (!session) return;
 
     setLoading(true);
@@ -98,6 +100,10 @@ export default function ArchivePage() {
       const url = new URL('/api/tweets', window.location.origin);
       if (forceRefresh) {
         url.searchParams.set('refresh', 'true');
+      }
+
+      if (cursor) {
+        url.searchParams.append('cursor', cursor);
       }
 
       const response = await fetch(url);
@@ -114,7 +120,7 @@ export default function ArchivePage() {
         return;
       }
 
-      setTweets(data.tweets);
+      setTweets(prev => cursor ? [...prev, ...data.tweets] : data.tweets);
       setUsers(data.users);
       saveToStorage(data.tweets, data.users);
       setLastRefreshTime(new Date());
@@ -123,6 +129,7 @@ export default function ArchivePage() {
         cacheAge: data._meta.cacheAge,
         message: data._meta.message
       });
+      setNextToken(data.next_token);
 
       if (data._meta.retryAfter) {
         setRetryAfter(data._meta.retryAfter);
@@ -200,10 +207,32 @@ export default function ArchivePage() {
     }
   };
 
+  const getSentimentColor = (sentiment: SentimentAnalysis) => {
+    switch (sentiment.category) {
+      case 'positive':
+        return 'bg-green-100 text-green-800';
+      case 'negative':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getSentimentEmoji = (sentiment: SentimentAnalysis) => {
+    switch (sentiment.category) {
+      case 'positive':
+        return '😊';
+      case 'negative':
+        return '😔';
+      default:
+        return '😐';
+    }
+  };
+
   if (!session) {
     return (
-      <div className="p-4">
-        <p>Please sign in to view your archive.</p>
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-lg text-gray-600">Please sign in to view your archive.</p>
       </div>
     );
   }
@@ -227,137 +256,67 @@ export default function ArchivePage() {
   }
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Tweet Arşivim</h1>
-        
-        {/* Refresh Butonu */}
-        <div className="flex flex-col items-end">
-          <Button
-            onClick={() => fetchTweets(true)}
-            disabled={loading || getRefreshTimeLeft() > 0}
-            className="flex items-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Yükleniyor...' : 'Yenile'}
-          </Button>
-          {getRefreshTimeLeft() > 0 && (
-            <p className="text-sm text-gray-500 mt-1">
-              {formatTimeLeft(getRefreshTimeLeft())} sonra tekrar deneyebilirsiniz
-            </p>
-          )}
-        </div>
-      </div>
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="mb-8 text-3xl font-bold">Your Positive Interactions</h1>
 
-      {/* Cache Durumu */}
-      {cacheInfo && (
-        <div className={`rounded-lg p-4 mb-4 ${cacheInfo.fromCache ? 'bg-blue-50 text-blue-700' : 'bg-green-50 text-green-700'}`}>
-          <p>
-            {cacheInfo.fromCache ? (
-              <>
-                <span className="font-medium">Cache'lenmiş veriler gösteriliyor. </span>
-                {cacheInfo.cacheAge && `(${formatCacheAge(cacheInfo.cacheAge)} önce cache'lendi)`}
-              </>
-            ) : (
-              <span className="font-medium">Yeni veriler başarıyla çekildi.</span>
-            )}
-          </p>
-          {cacheInfo.message && <p className="mt-1 text-sm">{cacheInfo.message}</p>}
+      {error && (
+        <div className="mb-4 rounded-lg bg-red-100 p-4 text-red-700">
+          {error}
         </div>
       )}
 
-      {/* Son Yenileme Zamanı */}
-      {lastRefreshTime && (
-        <p className="text-sm text-gray-500 mb-4">
-          Son yenileme: {lastRefreshTime.toLocaleTimeString()}
-        </p>
-      )}
-
-      <div className="flex gap-4 mb-6">
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="p-2 border rounded"
-        >
-          <option value="all">Tüm Kategoriler</option>
-          <option value={TweetCategories.POSITIVE}>Pozitif</option>
-          <option value={TweetCategories.NEUTRAL}>Nötr</option>
-        </select>
-
-        <select
-          value={selectedType}
-          onChange={(e) => setSelectedType(e.target.value)}
-          className="p-2 border rounded"
-        >
-          <option value="all">Tüm Tipler</option>
-          <option value={TweetCategories.MOTIVATIONAL}>Motivasyonel</option>
-          <option value={TweetCategories.FUNNY}>Komik</option>
-          <option value={TweetCategories.INFORMATIVE}>Bilgilendirici</option>
-          <option value={TweetCategories.ARTISTIC}>Sanatsal</option>
-        </select>
-      </div>
-
-      <div className="space-y-4">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {filteredTweets.map((tweet) => {
           const user = users[tweet.author_id];
-          return (
-            <div key={tweet.id} className="bg-white p-4 rounded-lg shadow">
-              {user && (
-                <div className="flex items-center mb-4">
-                  <div className="relative w-12 h-12 mr-4">
-                    <Image
-                      src={user.profile_image_url}
-                      alt={user.name}
-                      fill
-                      className="rounded-full object-cover"
-                      sizes="48px"
-                    />
-                  </div>
-                  <div>
-                    <p className="font-semibold">{user.name}</p>
-                    <p className="text-gray-500">@{user.username}</p>
-                  </div>
-                </div>
-              )}
-              
-              <p className="text-gray-800 mb-4">{tweet.text}</p>
-              
-              {tweet.sentiment && (
-                <div className="text-sm space-y-2 border-t pt-2">
-                  <div className="flex justify-between items-center">
-                    <p className={getCategoryColor(tweet.sentiment.category)}>
-                      Kategori: {tweet.sentiment.category}
-                    </p>
-                    <p>
-                      {getTypeEmoji(tweet.sentiment.type)} {tweet.sentiment.type}
-                    </p>
-                  </div>
-                  
-                  <div className="text-xs text-gray-500 space-y-1">
-                    <p>BERT: {(tweet.sentiment.stats.bertScore * 100).toFixed(1)}% {tweet.sentiment.stats.bertLabel}</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <p>Motivasyonel: {(tweet.sentiment.stats.categoryScores.motivational * 100).toFixed(1)}%</p>
-                      <p>Komik: {(tweet.sentiment.stats.categoryScores.funny * 100).toFixed(1)}%</p>
-                      <p>Bilgilendirici: {(tweet.sentiment.stats.categoryScores.informative * 100).toFixed(1)}%</p>
-                      <p>Sanatsal: {(tweet.sentiment.stats.categoryScores.artistic * 100).toFixed(1)}%</p>
-                    </div>
-                    <p>Emoji Sayısı: {tweet.sentiment.stats.emojis}</p>
-                  </div>
-                </div>
-              )}
+          if (!user) return null;
 
-              <div className="flex justify-between text-sm text-gray-500 mt-4">
-                <span>{new Date(tweet.created_at).toLocaleDateString()}</span>
-                <div className="flex space-x-4">
-                  <span>💬 {tweet.public_metrics.reply_count}</span>
+          return (
+            <div key={tweet.id} className="rounded-lg border p-4 shadow-sm">
+              <div className="mb-4 flex items-center gap-3">
+                <img
+                  src={user.profile_image_url}
+                  alt={user.name}
+                  className="h-10 w-10 rounded-full"
+                />
+                <div>
+                  <div className="font-medium">{user.name}</div>
+                  <div className="text-sm text-gray-500">@{user.username}</div>
+                </div>
+              </div>
+
+              <p className="mb-3 text-gray-800">{tweet.text}</p>
+
+              <div className="mb-3 flex items-center gap-2">
+                <span className={`rounded-full px-3 py-1 text-sm ${getSentimentColor(tweet.sentiment as SentimentAnalysis)}`}>
+                  {getSentimentEmoji(tweet.sentiment as SentimentAnalysis)} {tweet.sentiment?.category}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-sm text-gray-500">
+                <div className="flex gap-4">
                   <span>🔄 {tweet.public_metrics.retweet_count}</span>
+                  <span>💬 {tweet.public_metrics.reply_count}</span>
                   <span>❤️ {tweet.public_metrics.like_count}</span>
                 </div>
+                <time>{format(new Date(tweet.created_at), 'MMM d, yyyy')}</time>
               </div>
             </div>
           );
         })}
       </div>
+
+      {nextToken && (
+        <div className="mt-8 flex justify-center">
+          <Button
+            onClick={() => fetchTweets(false, nextToken)}
+            disabled={loading}
+            variant="outline"
+            size="lg"
+          >
+            {loading ? 'Loading...' : 'Load More'}
+          </Button>
+        </div>
+      )}
     </div>
   );
 } 
