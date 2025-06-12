@@ -43,9 +43,9 @@ export async function GET(req: NextRequest) {
     const cursor = searchParams.get('cursor');
     const threshold = parseFloat(searchParams.get('threshold') || '0.7');
 
-    // Önce kullanıcının following listesini al
-    const followingResponse = await fetch(
-      `https://api.twitter.com/2/users/${session.user.id}/following`,
+    // Kullanıcının kendi tweet'lerini al
+    const userTweetsResponse = await fetch(
+      `https://api.twitter.com/2/users/${session.user.id}/tweets?max_results=10&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
       {
         headers: {
           'Authorization': `Bearer ${session.accessToken}`,
@@ -53,45 +53,34 @@ export async function GET(req: NextRequest) {
       }
     );
 
-    if (!followingResponse.ok) {
-      console.error('Failed to fetch following list:', await followingResponse.text());
-      throw new Error('Failed to fetch following list');
+    if (!userTweetsResponse.ok) {
+      console.error('Failed to fetch user tweets:', await userTweetsResponse.text());
+      throw new Error('Failed to fetch user tweets');
     }
 
-    const followingData = await followingResponse.json();
-    
-    if (!followingData.data || !Array.isArray(followingData.data)) {
-      console.error('Invalid following data:', followingData);
-      throw new Error('Invalid following data structure');
+    const userTweetsData = await userTweetsResponse.json();
+    const userTweets = userTweetsData.data || [];
+
+    // Kullanıcının beğendiği tweet'leri al
+    const likedTweetsResponse = await fetch(
+      `https://api.twitter.com/2/users/${session.user.id}/liked_tweets?max_results=10&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+        },
+      }
+    );
+
+    if (!likedTweetsResponse.ok) {
+      console.error('Failed to fetch liked tweets:', await likedTweetsResponse.text());
+      throw new Error('Failed to fetch liked tweets');
     }
 
-    // Her bir takip edilen kullanıcının son tweet'lerini al
-    const allTweets: Tweet[] = [];
-    const userPromises = followingData.data.slice(0, 5).map(async (user: User) => {
-      const userTimelineResponse = await fetch(
-        `https://api.twitter.com/2/users/${user.id}/tweets?max_results=5&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
-        {
-          headers: {
-            'Authorization': `Bearer ${session.accessToken}`,
-          },
-        }
-      );
+    const likedTweetsData = await likedTweetsResponse.json();
+    const likedTweets = likedTweetsData.data || [];
 
-      if (!userTimelineResponse.ok) {
-        console.warn(`Failed to fetch tweets for user ${user.id}:`, await userTimelineResponse.text());
-        return [];
-      }
-
-      const timelineData = await userTimelineResponse.json();
-      return timelineData.data || [];
-    });
-
-    const userResults = await Promise.allSettled(userPromises);
-    userResults.forEach((result) => {
-      if (result.status === 'fulfilled') {
-        allTweets.push(...result.value);
-      }
-    });
+    // Tüm tweet'leri birleştir
+    const allTweets = [...userTweets, ...likedTweets];
 
     // Tweet'leri tarihe göre sırala
     allTweets.sort((a, b) => 
@@ -116,7 +105,10 @@ export async function GET(req: NextRequest) {
     };
 
     // Kullanıcı bilgilerini topla
-    const users = followingData.data;
+    const users = [
+      ...(userTweetsData.includes?.users || []),
+      ...(likedTweetsData.includes?.users || [])
+    ];
 
     // Sadece pozitif tweet'leri döndür
     return NextResponse.json({

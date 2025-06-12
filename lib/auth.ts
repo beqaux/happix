@@ -28,7 +28,11 @@ export const authOptions: NextAuthOptions = {
             "users.read",
             "follows.read",
             "follows.write",
-            "offline.access"
+            "like.read",
+            "like.write",
+            "offline.access",
+            "bookmark.read",
+            "bookmark.write"
           ].join(" ")
         }
       }
