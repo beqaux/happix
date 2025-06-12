@@ -3,6 +3,26 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { analyzeSentiment } from '@/lib/sentiment';
 
+interface Tweet {
+  id: string;
+  text: string;
+  created_at: string;
+  author_id: string;
+  public_metrics: {
+    retweet_count: number;
+    reply_count: number;
+    like_count: number;
+    quote_count: number;
+  };
+}
+
+interface User {
+  id: string;
+  name: string;
+  username: string;
+  profile_image_url?: string;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -21,78 +41,65 @@ export async function GET(req: NextRequest) {
     // URL'den parametreleri al
     const { searchParams } = new URL(req.url);
     const cursor = searchParams.get('cursor');
-    const threshold = parseFloat(searchParams.get('threshold') || '0.7'); // Varsayılan 0.7
+    const threshold = parseFloat(searchParams.get('threshold') || '0.7');
 
-    // X API endpoint'i
-    const endpoint = `https://api.twitter.com/2/users/${session.user.id}/home_timeline`;
-    const params = new URLSearchParams({
-      'tweet.fields': 'created_at,public_metrics,author_id,text',
-      'user.fields': 'profile_image_url,name,username',
-      'expansions': 'author_id',
-      'max_results': '20',
-    });
-
-    if (cursor) {
-      params.append('pagination_token', cursor);
-    }
-
-    console.log('Fetching from Twitter API:', endpoint);
-    console.log('With params:', params.toString());
-    console.log('Using token:', session.accessToken.substring(0, 10) + '...');
-
-    // X API'sine istek at
-    const response = await fetch(`${endpoint}?${params.toString()}`, {
-      headers: {
-        'Authorization': `Bearer ${session.accessToken}`,
-      },
-    });
-
-    if (!response.ok) {
-      // API hatası detaylarını al
-      let errorDetail;
-      try {
-        const error = await response.json();
-        console.error('Twitter API error response:', error);
-        errorDetail = error.detail || error.message || response.statusText;
-      } catch (e) {
-        console.error('Failed to parse error response:', e);
-        errorDetail = response.statusText;
+    // Önce kullanıcının following listesini al
+    const followingResponse = await fetch(
+      `https://api.twitter.com/2/users/${session.user.id}/following`,
+      {
+        headers: {
+          'Authorization': `Bearer ${session.accessToken}`,
+        },
       }
+    );
 
-      if (response.status === 401) {
-        return NextResponse.json(
-          { error: "Your session has expired. Please sign in again." },
-          { status: 401 }
-        );
-      }
-
-      throw new Error(`Twitter API error: ${errorDetail}`);
+    if (!followingResponse.ok) {
+      console.error('Failed to fetch following list:', await followingResponse.text());
+      throw new Error('Failed to fetch following list');
     }
 
-    const rawData = await response.text(); // Önce text olarak al
-    console.log('Raw API response:', rawData);
-
-    let data;
-    try {
-      data = JSON.parse(rawData);
-    } catch (e) {
-      console.error('Failed to parse API response:', e);
-      throw new Error('Invalid response from Twitter API');
-    }
-
-    // API yanıtını kontrol et
-    if (!data || !Array.isArray(data.data)) {
-      console.error('Unexpected API response structure:', data);
-      return NextResponse.json({
-        tweets: [],
-        users: [],
-        next_token: null,
-        stats: { total: 0, positive: 0, filtered: 0 }
-      });
-    }
+    const followingData = await followingResponse.json();
     
+    if (!followingData.data || !Array.isArray(followingData.data)) {
+      console.error('Invalid following data:', followingData);
+      throw new Error('Invalid following data structure');
+    }
+
+    // Her bir takip edilen kullanıcının son tweet'lerini al
+    const allTweets: Tweet[] = [];
+    const userPromises = followingData.data.slice(0, 5).map(async (user: User) => {
+      const userTimelineResponse = await fetch(
+        `https://api.twitter.com/2/users/${user.id}/tweets?max_results=5&tweet.fields=created_at,public_metrics,author_id,text&expansions=author_id&user.fields=profile_image_url,name,username`,
+        {
+          headers: {
+            'Authorization': `Bearer ${session.accessToken}`,
+          },
+        }
+      );
+
+      if (!userTimelineResponse.ok) {
+        console.warn(`Failed to fetch tweets for user ${user.id}:`, await userTimelineResponse.text());
+        return [];
+      }
+
+      const timelineData = await userTimelineResponse.json();
+      return timelineData.data || [];
+    });
+
+    const userResults = await Promise.allSettled(userPromises);
+    userResults.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        allTweets.push(...result.value);
+      }
+    });
+
+    // Tweet'leri tarihe göre sırala
+    allTweets.sort((a, b) => 
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
     // Tweet'leri analiz et
-    const tweets = await Promise.all(data.data.map(async (tweet: any) => {
+    const tweets = await Promise.all(allTweets.map(async (tweet) => {
       const sentiment = await analyzeSentiment(tweet.text);
       return {
         ...tweet,
@@ -108,11 +115,14 @@ export async function GET(req: NextRequest) {
       filtered: tweets.filter(t => !t.isPositive).length
     };
 
+    // Kullanıcı bilgilerini topla
+    const users = followingData.data;
+
     // Sadece pozitif tweet'leri döndür
     return NextResponse.json({
       tweets: tweets.filter(t => t.isPositive),
-      users: data.includes?.users || [],
-      next_token: data.meta?.next_token,
+      users,
+      next_token: null, // Şimdilik pagination yok
       stats
     });
 
